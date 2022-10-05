@@ -17,8 +17,7 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "mlir-hlo/Dialect/lhlo/IR/lhlo_ops.h"
-#include "mlir-hlo/Dialect/lhlo/transforms/PassDetail.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -29,6 +28,10 @@ limitations under the License.
 
 namespace mlir {
 namespace lmhlo {
+
+#define GEN_PASS_DEF_LHLOLEGALIZETOPARALLELLOOPSPASS
+#include "mlir-hlo/Dialect/lhlo/transforms/lmhlo_passes.h.inc"
+
 namespace {
 
 // Clones and adapts the code in `lhlo_block` that works on buffers and has a
@@ -82,8 +85,8 @@ void convertToReductionOperator(Location loc, scf::ReduceOp reduceOp,
 Value getStaticOrDynamicDim(mlir::Location loc, Value shapedValue,
                             size_t dimIndex, int64_t dim, OpBuilder* b) {
   return dim == ShapedType::kDynamicSize
-             ? b->create<memref::DimOp>(loc, shapedValue, dimIndex).getResult()
-             : b->create<arith::ConstantIndexOp>(loc, dim);
+             ? (Value)b->create<memref::DimOp>(loc, shapedValue, dimIndex)
+             : (Value)b->create<arith::ConstantIndexOp>(loc, dim);
 }
 
 struct MappedIvs {
@@ -101,12 +104,12 @@ MappedIvs mapWindowIvsToInput(OpTy op, Value operand, ValueRange ivs,
   if (!op.getWindowStrides().has_value()) {
     op.emitOpError("No window strides specified.");
   }
-  auto windowStrides = op.getWindowStrides().getValue();
+  auto windowStrides = op.getWindowStrides().value();
 
   if (!op.getPadding().has_value()) {
     op.emitOpError("No padding specified.");
   }
-  auto padding = op.getPadding().getValue();
+  auto padding = op.getPadding().value();
 
   auto loc = op.getLoc();
   auto operandShape = operand.getType().template cast<MemRefType>().getShape();
@@ -695,10 +698,10 @@ class SelectAndScatterOpConverter
 };
 
 struct LhloLegalizeToParallelLoopsPass
-    : public LhloLegalizeToParallelLoopsPassBase<
+    : public impl::LhloLegalizeToParallelLoopsPassBase<
           LhloLegalizeToParallelLoopsPass> {
   void getDependentDialects(DialectRegistry& registry) const override {
-    registry.insert<arith::ArithmeticDialect, func::FuncDialect,
+    registry.insert<arith::ArithDialect, func::FuncDialect,
                     memref::MemRefDialect, scf::SCFDialect>();
   }
 
@@ -715,7 +718,7 @@ struct LhloLegalizeToParallelLoopsPass
     // clang-format on
 
     ConversionTarget target(getContext());
-    target.addLegalDialect<arith::ArithmeticDialect, linalg::LinalgDialect,
+    target.addLegalDialect<arith::ArithDialect, linalg::LinalgDialect,
                            memref::MemRefDialect, func::FuncDialect,
                            scf::SCFDialect, LmhloDialect>();
     target.addIllegalOp<lmhlo::ReduceOp, lmhlo::ReduceWindowOp,

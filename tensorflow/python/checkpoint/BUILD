@@ -5,12 +5,7 @@ load(
     "//tensorflow/tools/test:performance.bzl",
     "tf_py_logged_benchmark",
 )
-
-# buildifier: disable=same-origin-load
-load("//tensorflow:tensorflow.bzl", "cuda_py_test")
-
-# buildifier: disable=same-origin-load
-load("//tensorflow:tensorflow.bzl", "tf_py_test")
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_test", "tf_py_test")
 
 package(
     default_visibility = [
@@ -45,6 +40,7 @@ py_library(
         ":functional_saver",
         ":graph_view",
         ":restore",
+        ":save_util",
         ":save_util_v1",
         ":util",
         "//tensorflow/core:protos_all_py",
@@ -73,7 +69,6 @@ py_library(
         "//tensorflow/python/trackable:base",
         "//tensorflow/python/trackable:data_structures",
         "//tensorflow/python/training/saving:saveable_object_util",
-        "@six_archive//:six",
     ],
 )
 
@@ -81,6 +76,7 @@ tf_py_test(
     name = "checkpoint_test",
     srcs = ["checkpoint_test.py"],
     tags = [
+        "no_pip",  # TODO(b/250108043)
         "no_windows",  # TODO(b/201457117)
         "notsan",  # TODO(b/74395663)
     ],
@@ -114,7 +110,6 @@ tf_py_test(
         "//tensorflow/python/trackable:autotrackable",
         "//tensorflow/python/trackable:base",
         "@absl_py//absl/testing:parameterized",
-        "@six_archive//:six",
     ],
 )
 
@@ -138,7 +133,6 @@ tf_py_test(
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:test",
         "//tensorflow/python/trackable:autotrackable",
-        "@six_archive//:six",
     ],
 )
 
@@ -189,6 +183,26 @@ py_library(
         "//tensorflow/python:util",
         "//tensorflow/python/trackable:base",
         "//tensorflow/python/trackable:converter",
+    ],
+)
+
+py_library(
+    name = "save_util",
+    srcs = ["save_util.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":save_util_v1",
+        ":saveable_compat",
+        "//tensorflow/python:constant_op",
+        "//tensorflow/python:dtypes",
+        "//tensorflow/python:framework_ops",
+        "//tensorflow/python:util",
+        "//tensorflow/python/saved_model/registration",
+        "//tensorflow/python/trackable:base",
+        "//tensorflow/python/trackable:python_state",
+        "//tensorflow/python/trackable:trackable_utils",
+        "//tensorflow/python/training/saving:saveable_object",
+        "//tensorflow/python/training/saving:saveable_object_util",
     ],
 )
 
@@ -267,6 +281,7 @@ py_library(
     srcs = ["restore.py"],
     srcs_version = "PY3",
     deps = [
+        ":checkpoint_view",
         ":saveable_compat",
         "//tensorflow/python:array_ops",
         "//tensorflow/python:framework_ops",
@@ -274,9 +289,11 @@ py_library(
         "//tensorflow/python:platform",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/saved_model/registration",
+        "//tensorflow/python/trackable:base",
         "//tensorflow/python/trackable:constants",
         "//tensorflow/python/trackable:python_state",
         "//tensorflow/python/trackable:trackable_utils",
+        "//tensorflow/python/training/saving:saveable_object_util",
     ],
 )
 

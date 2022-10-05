@@ -19,8 +19,8 @@ limitations under the License.
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "mlir/Analysis/BufferViewFlowAnalysis.h"  // from @llvm-project
 #include "mlir/Analysis/Liveness.h"  // from @llvm-project
+#include "mlir/Dialect/Bufferization/Transforms/BufferViewFlowAnalysis.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Dialect/Linalg/IR/Linalg.h"  // from @llvm-project
 #include "mlir/Dialect/MemRef/IR/MemRef.h"  // from @llvm-project
@@ -218,8 +218,8 @@ class BufferReuseAnalysis {
       // have the same size we also know that when one side has an identity map
       // and the other side only drops dimensions, these dimensions have to be
       // of size 1.
-      AffineMap old_indexing_map = generic_op.getTiedIndexingMap(*old_it);
-      AffineMap new_indexing_map = generic_op.getTiedIndexingMap(*new_it);
+      AffineMap old_indexing_map = generic_op.getMatchingIndexingMap(*old_it);
+      AffineMap new_indexing_map = generic_op.getMatchingIndexingMap(*new_it);
       return (old_indexing_map == new_indexing_map &&
               old_indexing_map.isProjectedPermutation()) ||
              (old_indexing_map.isIdentity() &&
@@ -233,10 +233,10 @@ class BufferReuseAnalysis {
   DenseMap<Operation *, int32_t> output_indices_;
 };
 
-#define GEN_PASS_CLASSES
+#define GEN_PASS_DEF_BUFFERREUSEPASS
 #include "tensorflow/compiler/mlir/tools/kernel_gen/transforms/kernel_gen_passes.h.inc"
 
-struct BufferReusePass : public BufferReusePassBase<BufferReusePass> {
+struct BufferReusePass : public impl::BufferReusePassBase<BufferReusePass> {
   void runOnOperation() override {
     if (!getOperation()->getAttrOfType<UnitAttr>(
             tf_framework::TFFrameworkDialect::kTFEntryAttrName))

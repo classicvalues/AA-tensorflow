@@ -19,7 +19,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/hlo_module_config.h"
 #include "tensorflow/compiler/xla/service/hlo_parser.h"
 #include "tensorflow/compiler/xla/tests/hlo_test_base.h"
-#include "tensorflow/core/platform/test.h"
+#include "tensorflow/tsl/platform/test.h"
 
 namespace xla {
 namespace gpu {
@@ -48,8 +48,7 @@ TEST_F(GpuUnrollingTest, DoNotUnroll) {
   auto debug_options = HloTestBase::GetDebugOptionsForTest();
   debug_options.set_xla_gpu_max_kernel_unroll_factor(1);
   config.set_debug_options(debug_options);
-  auto hlo_module =
-      ParseAndReturnVerifiedModule(kAddModule, config).ValueOrDie();
+  auto hlo_module = ParseAndReturnVerifiedModule(kAddModule, config).value();
 
   CompileAndVerifyIr(std::move(hlo_module),
                      R"(
@@ -69,8 +68,7 @@ TEST_F(GpuUnrollingTest, UnrollFourTimes) {
   debug_options.set_xla_gpu_max_kernel_unroll_factor(8);
   debug_options.set_xla_gpu_enable_mlir_lowering(false);
   config.set_debug_options(debug_options);
-  auto hlo_module =
-      ParseAndReturnVerifiedModule(kAddModule, config).ValueOrDie();
+  auto hlo_module = ParseAndReturnVerifiedModule(kAddModule, config).value();
 
   CompileAndVerifyIr(std::move(hlo_module),
                      R"(
@@ -82,7 +80,7 @@ TEST_F(GpuUnrollingTest, UnrollFourTimes) {
 ; CHECK-NOT: fadd
 ; CHECK: }
       )",
-                     /*match_optimized_ir=*/true);
+                     /*match_optimized_ir=*/false);
 }
 
 TEST_F(GpuUnrollingTest, UnrollDefaultTimes) {
@@ -91,22 +89,31 @@ TEST_F(GpuUnrollingTest, UnrollDefaultTimes) {
   auto debug_options = GetDebugOptionsFromFlags();
   debug_options.set_xla_gpu_enable_mlir_lowering(false);
   config.set_debug_options(debug_options);
-  auto hlo_module =
-      ParseAndReturnVerifiedModule(kAddModule, config).ValueOrDie();
+  auto hlo_module = ParseAndReturnVerifiedModule(kAddModule, config).value();
 
   CompileAndVerifyIr(std::move(hlo_module),
                      R"(
 ; CHECK-LABEL: @fusion
-; CHECK: load <4 x float>
+; CHECK: load float
+; CHECK: load float
 ; CHECK: fadd
+; CHECK: store float
+; CHECK: load float
+; CHECK: load float
 ; CHECK: fadd
+; CHECK: store float
+; CHECK: load float
+; CHECK: load float
 ; CHECK: fadd
+; CHECK: store float
+; CHECK: load float
+; CHECK: load float
 ; CHECK: fadd
+; CHECK: store float
 ; CHECK-NOT: fadd
-; CHECK: store <4 x float>
 ; CHECK: }
       )",
-                     /*match_optimized_ir=*/true);
+                     /*match_optimized_ir=*/false);
 }
 
 TEST_F(GpuUnrollingTest, UnrollUnfusedAdd) {
@@ -118,28 +125,37 @@ TEST_F(GpuUnrollingTest, UnrollUnfusedAdd) {
 
   const char *const kUnfusedAddModule = R"(
     HloModule test_module
-
     ENTRY AddFunc {
       p0 = f32[2,2]{1,0} parameter(0)
       p1 = f32[2,2]{1,0} parameter(1)
       ROOT add = f32[2,2]{1,0} add(p0, p1)
     })";
   auto hlo_module =
-      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).ValueOrDie();
+      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).value();
 
   CompileAndVerifyIr(std::move(hlo_module),
                      R"(
 ; CHECK-LABEL: @add
-; CHECK: load <4 x float>
+; CHECK: load float
+; CHECK: load float
 ; CHECK: fadd
+; CHECK: store float
+; CHECK: load float
+; CHECK: load float
 ; CHECK: fadd
+; CHECK: store float
+; CHECK: load float
+; CHECK: load float
 ; CHECK: fadd
+; CHECK: store float
+; CHECK: load float
+; CHECK: load float
 ; CHECK: fadd
+; CHECK: store float
 ; CHECK-NOT: fadd
-; CHECK: store <4 x float>
 ; CHECK: }
       )",
-                     /*match_optimized_ir=*/true);
+                     /*match_optimized_ir=*/false);
 }
 
 TEST_F(GpuUnrollingTest, DisabledUnrollUnfusedSine) {
@@ -156,23 +172,13 @@ TEST_F(GpuUnrollingTest, DisabledUnrollUnfusedSine) {
       ROOT s = f32[1600000]{0} sine(p0)
     })";
   auto hlo_module =
-      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).ValueOrDie();
+      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).value();
 
-  // Note: On ROCm side, we do bare minimal to make the test pass.
-  // "sine" function is in different code generation path from nvptx: on
-  // ROCm platform, it get pulled in from ROCm-Device-Libs, whereas in
-  // Cuda, generated llvm IR is compiled PTX.
-  auto expected_ir = is_built_with_rocm_ ? R"(
-; CHECK: __ocml_sin_f32
-; CHECK-NOT: load float
-)"
-                                         : R"(
+  CompileAndVerifyIr(std::move(hlo_module),
+                     R"(
 ; CHECK: load float
-; CHECK-NOT: load float
-}
-)";
-
-  CompileAndVerifyIr(std::move(hlo_module), expected_ir,
+; CHECK-NOT: load float }
+      )",
                      /*match_optimized_ir=*/true);
 }
 
@@ -190,23 +196,13 @@ TEST_F(GpuUnrollingTest, DisabledUnrollUnfusedCosine) {
       ROOT s = f32[1600000]{0} cosine(p0)
     })";
   auto hlo_module =
-      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).ValueOrDie();
+      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).value();
 
-  // Note: On ROCm side, we do bare minimal to make the test pass.
-  // "cosine" function is in different code generation path from nvptx: on
-  // ROCm platform, it get pulled in from ROCm-Device-Libs, whereas in
-  // Cuda, generated llvm IR is compiled PTX.
-  auto expected_ir = is_built_with_rocm_ ? R"(
-; CHECK: __ocml_cos_f32
-; CHECK-NOT: load float
-)"
-                                         : R"(
+  CompileAndVerifyIr(std::move(hlo_module),
+                     R"(
 ; CHECK: load float
-; CHECK-NOT: load float
-}
-)";
-
-  CompileAndVerifyIr(std::move(hlo_module), expected_ir,
+; CHECK-NOT: load float }
+      )",
                      /*match_optimized_ir=*/true);
 }
 
@@ -224,7 +220,7 @@ TEST_F(GpuUnrollingTest, DisabledUnrollUnfusedPower) {
       ROOT s = f32[1600000]{0} power(p0, p0)
     })";
   auto hlo_module =
-      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).ValueOrDie();
+      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).value();
 
   CompileAndVerifyIr(std::move(hlo_module),
                      R"(
@@ -249,7 +245,7 @@ TEST_F(GpuUnrollingTest, DisabledUnrollUnfusedAtan2) {
       ROOT s = f32[16000000]{0} atan2(p0, p0)
     })";
   auto hlo_module =
-      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).ValueOrDie();
+      ParseAndReturnVerifiedModule(kUnfusedAddModule, config).value();
 
   CompileAndVerifyIr(std::move(hlo_module),
                      R"(
@@ -287,27 +283,44 @@ TEST_F(GpuUnrollingTest, UnrollMultiOutputFusion) {
                                                    calls=fused_computation
     })";
   auto hlo_module =
-      ParseAndReturnVerifiedModule(kMultiOutputFusionModule, config)
-          .ValueOrDie();
+      ParseAndReturnVerifiedModule(kMultiOutputFusionModule, config).value();
 
   CompileAndVerifyIr(std::move(hlo_module),
                      R"(
 ; CHECK-LABEL: @fusion
-; CHECK: load <2 x float>
-; CHECK: load <2 x float>
-; CHECK-NOT: load <2 x float>
+; CHECK: load float
+; CHECK: load float
+; CHECK-NOT: load float
+; CHECK-NOT: load float
 ; CHECK: fadd
+; CHECK: load float
+; CHECK: load float
+; CHECK-NOT: load float
+; CHECK-NOT: load float
 ; CHECK: fmul
+; CHECK: store float
+; CHECK: store float
+; CHECK-NOT: store float
+; CHECK-NOT: store float
+; CHECK: load float
+; CHECK: load float
+; CHECK-NOT: load float
+; CHECK-NOT: load float
 ; CHECK: fadd
+; CHECK: load float
+; CHECK: load float
+; CHECK-NOT: load float
+; CHECK-NOT: load float
 ; CHECK: fmul
-; CHECK: store <2 x float>
-; CHECK: store <2 x float>
-; CHECK-NOT: store <2 x float>
+; CHECK: store float
+; CHECK: store float
+; CHECK-NOT: store float
+; CHECK-NOT: store float
 ; CHECK-NOT: fadd
 ; CHECK-NOT: fmul
 ; CHECK: }
       )",
-                     /*match_optimized_ir=*/true);
+                     /*match_optimized_ir=*/false);
 }
 
 }  // namespace

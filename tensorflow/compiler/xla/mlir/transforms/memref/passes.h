@@ -13,8 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_MLIR_MEMREF_PASSES_H_
-#define XLA_MLIR_MEMREF_PASSES_H_
+#ifndef TENSORFLOW_COMPILER_XLA_MLIR_TRANSFORMS_MEMREF_PASSES_H_
+#define TENSORFLOW_COMPILER_XLA_MLIR_TRANSFORMS_MEMREF_PASSES_H_
 
 #include <memory>
 
@@ -23,6 +23,9 @@ limitations under the License.
 
 namespace xla {
 namespace runtime {
+
+#define GEN_PASS_DECL_ALIGNEDALLOCATIONSPASS
+#include "tensorflow/compiler/xla/mlir/transforms/memref/passes.h.inc"
 
 std::unique_ptr<mlir::OperationPass<mlir::func::FuncOp>>
 CreateAlignedAllocationsPass(int64_t alignment = 64);
@@ -33,4 +36,4 @@ CreateAlignedAllocationsPass(int64_t alignment = 64);
 }  // namespace runtime
 }  // namespace xla
 
-#endif  // XLA_MLIR_MEMREF_PASSES_H_
+#endif  // TENSORFLOW_COMPILER_XLA_MLIR_TRANSFORMS_MEMREF_PASSES_H_

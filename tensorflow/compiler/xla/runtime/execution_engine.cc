@@ -17,32 +17,37 @@ limitations under the License.
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/str_format.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ExecutionEngine/JITEventListener.h"
 #include "llvm/ExecutionEngine/ObjectCache.h"
 #include "llvm/ExecutionEngine/Orc/CompileUtils.h"
 #include "llvm/ExecutionEngine/Orc/ExecutionUtils.h"
 #include "llvm/ExecutionEngine/Orc/IRCompileLayer.h"
-#include "llvm/ExecutionEngine/Orc/IRTransformLayer.h"
 #include "llvm/ExecutionEngine/Orc/JITTargetMachineBuilder.h"
 #include "llvm/ExecutionEngine/Orc/RTDyldObjectLinkingLayer.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "tfrt/support/error_util.h"  // from @tf_runtime
+#include "tensorflow/compiler/xla/runtime/errors.h"
 
 namespace xla {
 namespace runtime {
+
+using absl::StatusOr;
+using absl::StrFormat;
 
 using llvm::cast;
 
 using llvm::Expected;
 using llvm::MemoryBuffer;
 using llvm::SectionMemoryManager;
-using llvm::StringRef;
 using llvm::Triple;
 
 using llvm::orc::DynamicLibrarySearchGenerator;
@@ -54,8 +59,6 @@ using llvm::orc::RTDyldObjectLinkingLayer;
 using llvm::orc::SymbolMap;
 using llvm::orc::ThreadSafeModule;
 using llvm::orc::TMOwningSimpleCompiler;
-
-using tfrt::MakeStringError;
 
 ExecutionEngine::ExecutionEngine(bool enable_gdb_listener,
                                  bool enable_perf_listener) {
@@ -87,31 +90,31 @@ std::unique_ptr<MemoryBuffer> ExecutionEngine::obj_file() const {
 
 // -------------------------------------------------------------------------- //
 
-static std::string GetEntrypointName(StringRef name) {
-  return llvm::formatv("__xla__{0}", name);
+static std::string GetExportedName(std::string_view name) {
+  return StrFormat("__xla__%s", name);
 }
 
-// Converts entrypoint function to an interface function that wraps all the
+// Converts exported function to an interface function that wraps all the
 // arguments of the original function into an i8** pointer to provide a function
 // with trivial ABI.
-static llvm::Error SetUpEntrypointFunction(llvm::Module &module,
-                                           StringRef entrypoint) {
+static absl::Status SetUpExportedFunction(llvm::Module &module,
+                                          std::string_view function_name) {
   llvm::IRBuilder<> builder(module.getContext());
 
-  // Check that we have an entrypoint function with a valid type.
-  llvm::Function *func = module.getFunction(entrypoint);
+  // Check that we have a function with a valid type.
+  llvm::Function *func = module.getFunction(function_name);
   if (!func)
-    return MakeStringError("entrypoint function not found: ", entrypoint);
+    return InternalError("exported function not found: %s", function_name);
   if (!func->getReturnType()->isVoidTy())
-    return MakeStringError("entrypoint function must return void");
+    return InternalError("exported function must return void");
 
-  // Add an XLA interface function for the entrypoint.
+  // Add an XLA interface function for the exported function.
   llvm::FunctionType *xla_runtime_type = llvm::FunctionType::get(
       builder.getVoidTy(), builder.getInt8PtrTy()->getPointerTo(),
       /*isVarArg=*/false);
 
   llvm::FunctionCallee xla_runtime_func = module.getOrInsertFunction(
-      GetEntrypointName(func->getName()), xla_runtime_type);
+      GetExportedName(func->getName()), xla_runtime_type);
 
   llvm::Function *callee = cast<llvm::Function>(xla_runtime_func.getCallee());
   llvm::Value *packed_args = callee->arg_begin();
@@ -142,12 +145,14 @@ static llvm::Error SetUpEntrypointFunction(llvm::Module &module,
   builder.CreateCall(func, args);
   builder.CreateRetVoid();
 
-  return llvm::Error::success();
+  return absl::OkStatus();
 }
 
 // -------------------------------------------------------------------------- //
 
 namespace {
+using llvm::DenseMap;
+
 // Intercept object compilation to save the object file corresponding to the
 // XLA executable in the execution engine.
 class ExecutionEngineObjectCache : public llvm::ObjectCache {
@@ -161,8 +166,7 @@ class ExecutionEngineObjectCache : public llvm::ObjectCache {
   std::unique_ptr<llvm::MemoryBuffer> stealObject(const llvm::Module *m);
 
  private:
-  llvm::DenseMap<const llvm::Module *, std::unique_ptr<llvm::MemoryBuffer>>
-      objs_;
+  DenseMap<const llvm::Module *, std::unique_ptr<llvm::MemoryBuffer>> objs_;
 };
 }  // namespace
 
@@ -188,10 +192,17 @@ std::unique_ptr<llvm::MemoryBuffer> ExecutionEngineObjectCache::stealObject(
 
 // -------------------------------------------------------------------------- //
 
-/*static*/ Expected<std::unique_ptr<ExecutionEngine>>
+std::string ToString(const llvm::Error &err) {
+  std::string str;
+  llvm::raw_string_ostream(str) << err;
+  return str;
+}
+
+/*static*/ StatusOr<std::unique_ptr<ExecutionEngine>>
 ExecutionEngine::CreateFromModule(std::unique_ptr<llvm::LLVMContext> ctx,
                                   std::unique_ptr<llvm::Module> module,
-                                  StringRef entrypoint, JitOptions options) {
+                                  JitOptions options,
+                                  absl::Span<const std::string_view> exported) {
   auto engine = std::unique_ptr<ExecutionEngine>(new ExecutionEngine(
       options.enable_gdb_listener, options.enable_perf_listener));
 
@@ -200,7 +211,7 @@ ExecutionEngine::CreateFromModule(std::unique_ptr<llvm::LLVMContext> ctx,
 
   // Set up the target machine details.
   if (!options.target_machine)
-    return MakeStringError("target machine was not provided");
+    return InternalError("target machine was not provided");
   module->setDataLayout(options.target_machine->createDataLayout());
   module->setTargetTriple(options.target_machine->getTargetTriple().str());
 
@@ -208,11 +219,16 @@ ExecutionEngine::CreateFromModule(std::unique_ptr<llvm::LLVMContext> ctx,
   auto transformer = options.make_optimizing_transformer(
       options.opt_level, /*sizeLevel=*/0, options.target_machine);
   if (auto err = transformer(module_ptr))
-    return MakeStringError("failed to run optimization pipeline: ", err);
+    return InternalError("failed to run optimization pipeline: %s",
+                         ToString(err));
 
-  // Set up the entry point function compatible with XLA ABI.
-  if (auto err = SetUpEntrypointFunction(*module, entrypoint))
-    return MakeStringError("failed to set up entrypoint ABI: ", err);
+  // Set up exported functions interface functions in the LLVM module.
+  for (std::string_view name : exported) {
+    if (auto status = SetUpExportedFunction(*module, name); !status.ok())
+      return InternalError(
+          "failed to set up exported function %s interface: %s", name,
+          status.message());
+  }
 
   // Callback to create the object layer with a user-provided section memory
   // mapper and JIT event listeners.
@@ -253,12 +269,12 @@ ExecutionEngine::CreateFromModule(std::unique_ptr<llvm::LLVMContext> ctx,
                  .setObjectLinkingLayerCreator(obj_layer_creator)
                  .create();
   if (auto err = jit.takeError())
-    return MakeStringError("failed to construct LLJIT: ", err);
+    return InternalError("failed to construct LLJIT: %s", ToString(err));
 
   // Register input module with the LLJIT.
   ThreadSafeModule tsm(std::move(module), std::move(ctx));
   if (auto err = (*jit)->addIRModule(std::move(tsm)))
-    return MakeStringError("failed to add source module: ", err);
+    return InternalError("failed to add source module: %s", ToString(err));
 
   llvm::orc::JITDylib &main_jd = (*jit)->getMainJITDylib();
   llvm::DataLayout data_layout = (*jit)->getDataLayout();
@@ -267,7 +283,7 @@ ExecutionEngine::CreateFromModule(std::unique_ptr<llvm::LLVMContext> ctx,
   auto generator = DynamicLibrarySearchGenerator::GetForCurrentProcess(
       data_layout.getGlobalPrefix());
   if (auto err = generator.takeError())
-    return MakeStringError("failed to construct DyLib search generator");
+    return InternalError("failed to construct DyLib search generator");
   main_jd.addGenerator(std::move(*generator));
 
   // Register user-provided symbols.
@@ -276,17 +292,24 @@ ExecutionEngine::CreateFromModule(std::unique_ptr<llvm::LLVMContext> ctx,
                                                data_layout);
     auto symbols = absoluteSymbols(options.symbols_binding(mangle));
     if (auto err = main_jd.define(symbols))
-      return MakeStringError("failed to add symbols bindings: ", err);
+      return InternalError("failed to add symbols bindings: %s", ToString(err));
   }
 
-  // Trigger compilation by looking up the entrypoint function.
-  Expected<ExecutorAddr> addr = (*jit)->lookup(GetEntrypointName(entrypoint));
-  if (auto err = addr.takeError())
-    return MakeStringError("failed to compile the entrypoint: ", err);
+  // Resolve all exported functions to function pointers.
+  for (std::string_view name : exported) {
+    // Trigger compilation by looking up the exported function.
+    Expected<ExecutorAddr> addr = (*jit)->lookup(GetExportedName(name));
+    if (auto err = addr.takeError())
+      return InternalError("failed to compile exported function %s: %s", name,
+                           ToString(err));
 
-  // Check that we found an address of an entrypoint function.
-  auto ptr = addr->toPtr<EntrypointFunctionPtr>();
-  if (!ptr) return MakeStringError("entrypoint function resolved to null");
+    // Check that we found an address of an exported function.
+    auto ptr = addr->toPtr<ExportedFunctionPtr>();
+    if (!ptr)
+      return InternalError("exported function %s resolved to null", name);
+
+    engine->exported_.push_back(ptr);
+  }
 
   // Check that if we enabled object cache we have an object file for the
   // compiled module.
@@ -294,19 +317,18 @@ ExecutionEngine::CreateFromModule(std::unique_ptr<llvm::LLVMContext> ctx,
       options.save_compiled_obj_file ? obj_cache->stealObject(module_ptr)
                                      : nullptr;
   if (options.save_compiled_obj_file && !obj_file)
-    return MakeStringError("could not find object file for the XLA module");
+    return InternalError("could not find object file for the XLA module");
 
   // Fill remaining fields and return constructed ExecutionEngine to the caller.
   engine->jit_ = std::move(*jit);
-  engine->entrypoint_ptr_ = ptr;
   engine->obj_file_ = std::move(obj_file);
   return std::move(engine);
 }
 
-/*static*/ Expected<std::unique_ptr<ExecutionEngine>>
-ExecutionEngine::CreateFromObjFile(std::unique_ptr<llvm::MemoryBuffer> obj_file,
-                                   llvm::StringRef entrypoint,
-                                   AotOptions options) {
+/*static*/ StatusOr<std::unique_ptr<ExecutionEngine>>
+ExecutionEngine::CreateFromObjFile(
+    std::unique_ptr<llvm::MemoryBuffer> obj_file, AotOptions options,
+    absl::Span<const std::string_view> exported) {
   auto engine = std::unique_ptr<ExecutionEngine>(new ExecutionEngine(
       options.enable_gdb_listener, options.enable_perf_listener));
 
@@ -332,10 +354,10 @@ ExecutionEngine::CreateFromObjFile(std::unique_ptr<llvm::MemoryBuffer> obj_file,
                  .setObjectLinkingLayerCreator(obj_layer_creator)
                  .create();
   if (auto err = jit.takeError())
-    return MakeStringError("failed to construct LLJIT: ", err);
+    return InternalError("failed to construct LLJIT: %s", ToString(err));
 
   if (auto err = (*jit)->addObjectFile(std::move(obj_file)))
-    return MakeStringError("failed to add object file: ", err);
+    return InternalError("failed to add object file: %s", ToString(err));
 
   llvm::orc::JITDylib &main_jd = (*jit)->getMainJITDylib();
   llvm::DataLayout data_layout = (*jit)->getDataLayout();
@@ -344,7 +366,7 @@ ExecutionEngine::CreateFromObjFile(std::unique_ptr<llvm::MemoryBuffer> obj_file,
   auto generator = DynamicLibrarySearchGenerator::GetForCurrentProcess(
       data_layout.getGlobalPrefix());
   if (auto err = generator.takeError())
-    return MakeStringError("failed to construct DyLib search generator");
+    return InternalError("failed to construct DyLib search generator");
   main_jd.addGenerator(std::move(*generator));
 
   // Register user-provided symbols.
@@ -353,21 +375,27 @@ ExecutionEngine::CreateFromObjFile(std::unique_ptr<llvm::MemoryBuffer> obj_file,
                                                data_layout);
     auto symbols = absoluteSymbols(options.symbols_binding(mangle));
     if (auto err = main_jd.define(symbols))
-      return MakeStringError("failed to add symbols bindings: ", err);
+      return InternalError("failed to add symbols bindings: %s", ToString(err));
   }
 
-  // Lookup entrypoint in the loaded object file.
-  Expected<ExecutorAddr> addr = (*jit)->lookup(GetEntrypointName(entrypoint));
-  if (auto err = addr.takeError())
-    return MakeStringError("failed to lookup the entrypoint: ", err);
+  // Resolve all exported functions to function pointers.
+  for (std::string_view name : exported) {
+    // Lookup exported function in the loaded object file.
+    Expected<ExecutorAddr> addr = (*jit)->lookup(GetExportedName(name));
+    if (auto err = addr.takeError())
+      return InternalError("failed to look up the exported function %s: %s",
+                           name, ToString(err));
 
-  // Check that we found an address of an entrypoint function.
-  auto ptr = addr->toPtr<EntrypointFunctionPtr>();
-  if (!ptr) return MakeStringError("entrypoint function resolved to null");
+    // Check that we found an address of an exported function.
+    auto ptr = addr->toPtr<ExportedFunctionPtr>();
+    if (!ptr)
+      return InternalError("exported function %s resolved to null", name);
+
+    engine->exported_.push_back(ptr);
+  }
 
   // Fill remaining fields and return constructed ExecutionEngine to the caller.
   engine->jit_ = std::move(*jit);
-  engine->entrypoint_ptr_ = ptr;
   return std::move(engine);
 }
 

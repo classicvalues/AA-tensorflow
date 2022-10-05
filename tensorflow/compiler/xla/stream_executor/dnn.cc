@@ -15,11 +15,15 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/stream_executor/dnn.h"
 
-#include "absl/hash/hash.h"
+#include <cstdint>
+#include <iterator>
+
+#include "absl/algorithm/container.h"
+#include "absl/container/btree_map.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
-#include "tensorflow/core/lib/strings/proto_serialization.h"
+#include "tensorflow/tsl/lib/strings/proto_serialization.h"
 
 namespace stream_executor {
 namespace dnn {
@@ -46,8 +50,8 @@ constexpr DataType ToDataType<float>::value;
 constexpr DataType ToDataType<double>::value;
 constexpr DataType ToDataType<Eigen::half>::value;
 constexpr DataType ToDataType<Eigen::bfloat16>::value;
-constexpr DataType ToDataType<int8>::value;
-constexpr DataType ToDataType<int32>::value;
+constexpr DataType ToDataType<int8_t>::value;
+constexpr DataType ToDataType<int32_t>::value;
 constexpr DataType ToDataType<std::complex<float>>::value;
 constexpr DataType ToDataType<std::complex<double>>::value;
 
@@ -66,7 +70,7 @@ AlgorithmDesc::AlgorithmDesc(
 }
 
 uint64_t AlgorithmDesc::hash() const {
-  return tensorflow::DeterministicProtoHash64(proto_);
+  return tsl::DeterministicProtoHash64(proto_);
 }
 
 bool AlgorithmDesc::operator==(const AlgorithmDesc& other) const {
@@ -82,12 +86,14 @@ std::string AlgorithmDesc::ToString() const {
   if (is_cudnn_frontend()) {
     // Format similarly to cudnn_frontend::ExecutionPlan::getTag(), e.g.
     // "eng2{k1=2,k3=4}".
+    absl::btree_map<int64_t, int64_t> tuning_knobs_sorted;
+    absl::c_copy(proto_.tuning_knobs(),
+                 std::inserter(tuning_knobs_sorted, tuning_knobs_sorted.end()));
     return absl::StrFormat(
         "eng%d{%s}", proto_.algo_id(),
         absl::StrJoin(
-            proto_.tuning_knobs(), ",",
-            [](std::string* out,
-               const google::protobuf::Map<int64_t, int64_t>::value_type& pair) {
+            tuning_knobs_sorted, ",",
+            [](std::string* out, const std::pair<int64_t, int64_t>& pair) {
               absl::StrAppendFormat(out, "k%d=%d", pair.first, pair.second);
             }));
   }
@@ -143,7 +149,8 @@ port::Status DnnSupport::GetFusedConvolveRunners(
     bool use_cudnn_frontend, dnn::ConvolutionKind kind,
     dnn::DataType element_type, dnn::DataType bias_type,
     dnn::DataType output_type, double conv_input_scale, double side_input_scale,
-    Stream* stream, const dnn::BatchDescriptor& input_descriptor,
+    double leakyrelu_alpha, Stream* stream,
+    const dnn::BatchDescriptor& input_descriptor,
     const dnn::FilterDescriptor& filter_descriptor,
     const dnn::BatchDescriptor& bias_descriptor,
     const dnn::BatchDescriptor& output_descriptor,
@@ -153,12 +160,24 @@ port::Status DnnSupport::GetFusedConvolveRunners(
   return port::UnimplementedError("GetFusedConvolveRunners not implemented.");
 }
 
+port::Status DnnSupport::GetFusedMatmulRunners(
+    bool use_cudnn_frontend, dnn::DataType element_type,
+    dnn::DataType bias_type, dnn::DataType output_type, Stream* stream,
+    bool trans_a, bool trans_b, uint64_t m, uint64_t n, uint64_t k, int64_t lda,
+    int64_t ldb, int64_t ldc, dnn::ActivationMode activation_mode,
+    bool use_fallback,
+    std::vector<std::unique_ptr<const dnn::FusedMatmulRunner>>*
+        out_exec_plans) {
+  return port::UnimplementedError("GetFusedMatmulRunners not implemented.");
+}
+
 port::StatusOr<std::unique_ptr<const dnn::FusedConvRunner>>
 DnnSupport::FusedConvolveRunnerFromDesc(
     Stream* stream, const dnn::AlgorithmDesc& algorithm_desc,
     dnn::ConvolutionKind kind, dnn::DataType element_type,
     dnn::DataType bias_type, dnn::DataType output_type, double conv_scale,
-    double side_input_scale, const dnn::BatchDescriptor& input_descriptor,
+    double side_input_scale, double leakyrelu_alpha,
+    const dnn::BatchDescriptor& input_descriptor,
     const dnn::FilterDescriptor& filter_descriptor,
     const dnn::BatchDescriptor& bias_descriptor,
     const dnn::BatchDescriptor& output_descriptor,
@@ -561,7 +580,7 @@ std::string BatchDescriptor::ToShortString() const {
     case DataLayout::kBatchDepthYX32:
       return absl::StrCat(batch, depth, spatial, suffix, "(VECT_C)");
     default:
-      LOG(FATAL) << "Unknown layout " << static_cast<int32>(layout());
+      LOG(FATAL) << "Unknown layout " << static_cast<int32_t>(layout());
       return "";  // Avoid return warning (unreachable)
   }
 }
@@ -670,7 +689,7 @@ std::string FilterDescriptor::ToShortString() const {
     case FilterLayout::kYXInputOutput:
       return absl::StrCat(spatial, id, od);
     default:
-      LOG(FATAL) << "Unknown layout " << static_cast<int32>(layout());
+      LOG(FATAL) << "Unknown layout " << static_cast<int32_t>(layout());
       return "";  // Avoid return warning (unreachable)
   }
 }
@@ -877,7 +896,7 @@ port::Status DnnSupport::DoCtcLoss(
     absl::Span<const int> labels_lengths_data,
     absl::Span<const int> input_lengths_data, DeviceMemoryBase costs_data,
     const RnnStateTensorDescriptor& grads_desc, DeviceMemoryBase grads_data,
-    DeviceMemory<uint8> scratch_memory, int ctc_loss_algo_id) {
+    DeviceMemory<uint8_t> scratch_memory, int ctc_loss_algo_id) {
   return port::UnimplementedError("CtcLoss not implemented");
 }
 

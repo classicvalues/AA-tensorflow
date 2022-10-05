@@ -41,15 +41,32 @@ ENTRY %dummy_main (Arg_0.1: f32[]) -> f32[] {
   ROOT after-all = token[] after-all()
 }
 
+// Test all-gather
+
 // CHECK-LABEL:  func private @test_all_gather
 // CHECK-SAME:  ([[INPUT:%.*]]: tensor<128x32xf32>)
 %test_all_gather {
   input = f32[128,32] parameter(0)
   // CHECK-NEXT:  "mhlo.all_gather"([[INPUT]])
   // CHECK-SAME: all_gather_dim = 1 : i64
+  // CHECK-NOT: use_global_device_ids
+  // CHECK-SAME: channel_handle = #mhlo.channel_handle<handle = 1, type = 0>
+  // CHECK-NOT: use_global_device_ids
+  // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7]]> : tensor<2x4xi64>
+  // CHECK-NOT: use_global_device_ids
+  ROOT ag = f32[128,128] all-gather(input), channel_id=1, replica_groups={{0, 2, 4, 6}, {1, 3, 5, 7}}, dimensions={1}
+}
+
+// CHECK-LABEL:  func private @test_all_gather_global
+// CHECK-SAME:  ([[INPUT:%.*]]: tensor<128x32xf32>)
+%test_all_gather_global {
+  input = f32[128,32] parameter(0)
+  // CHECK-NEXT:  "mhlo.all_gather"([[INPUT]])
+  // CHECK-SAME: all_gather_dim = 1 : i64
   // CHECK-SAME: channel_handle = #mhlo.channel_handle<handle = 1, type = 0>
   // CHECK-SAME{LITERAL}: replica_groups = dense<[[0, 2, 4, 6], [1, 3, 5, 7]]> : tensor<2x4xi64>
-  ROOT ag = f32[128,128] all-gather(input), channel_id=1, replica_groups={{0, 2, 4, 6}, {1, 3, 5, 7}}, dimensions={1}
+  // CHECK-SAME: use_global_device_ids
+  ROOT ag = f32[128,128] all-gather(input), channel_id=1, replica_groups={{0, 2, 4, 6}, {1, 3, 5, 7}}, dimensions={1}, use_global_device_ids=true
 }
 
 // Test all-to-all
@@ -340,6 +357,15 @@ add {
   ROOT %add.5 = f64[4] add(f64[4] %convert.3, f64[4] %convert.4)
 }
 
+// CHECK-LABEL:  func private @test_stochastic_convert(%arg0: tensor<4x3xf32>, %arg1: tensor<4x3xi32>) -> tensor<4x3xi8>
+%test_stochastic_convert (Arg_0.1: f32[4,3], Arg_1.2: s32[4,3]) -> s8[4,3] {
+  %Arg_0.1 = f32[4,3] parameter(0)
+  %Arg_1.2 = s32[4,3] parameter(1)
+
+  // CHECK-NEXT:  "mhlo.stochastic_convert"(%arg0, %arg1) : (tensor<4x3xf32>, tensor<4x3xi32>) -> tensor<4x3xi8>
+  ROOT %stochastic-convert.0 = s8[4,3] stochastic-convert(f32[4,3] %Arg_0.1, s32[4,3] %Arg_1.2)
+}
+
 // CHECK-LABEL:  func private @test_cosine(%arg0: tensor<1x16x16x3xf32>) -> tensor<1x16x16x3xf32>
 %test_cosine (arg0.1: f32[1,16,16,3]) -> f32[1,16,16,3] {
   %arg0.1 = f32[1,16,16,3]{3,2,1,0} parameter(0), metadata={op_name="HLO_Args"}
@@ -419,6 +445,18 @@ add {
   // CHECK-SAME: called_computations = [@custom_call_computation_0, @custom_call_computation_1]
   // CHECK-SAME: : (tensor<2x3xf32>, tensor<5x5xf32>) -> tensor<1x2x3xf32>
   ROOT %custom-call = f32[1,2,3]{0,2,1} custom-call(f32[2,3] %arg1, f32[5,5] %arg2), custom_call_target="foo", called_computations={%custom_call_computation_0, %custom_call_computation_1}
+}
+
+// CHECK-LABEL:  func private @test_custom_call_with_output_operand_alising
+// CHECK-SAME:  [[ARG_0:%.*]]: tuple<tensor<1x1xf32>, tensor<2x3xf32>>, [[ARG_1:%.*]]: tensor<5x5xf32>) -> tuple<tensor<2x3xf32>>
+%test_custom_call_with_output_operand_alising (arg1: (f32[1,1], f32[2,3]), arg2: f32[5,5]) -> (f32[2,3]) {
+  %arg1 = (f32[1,1], f32[2,3]) parameter(0)
+  %arg2 = f32[5,5] parameter(1)
+  // CHECK:  "mhlo.custom_call"([[ARG_0]], [[ARG_1]]) {
+  // CHECK-SAME: call_target_name = "foo"
+  // CHECK-SAME{LITERAL}: custom_call_output_operand_aliasing = [#mhlo.output_operand_alias<output_tuple_indices = [0], operand_index = 0, operand_tuple_indices = [1]>]
+  // CHECK-SAME: (tuple<tensor<1x1xf32>, tensor<2x3xf32>>, tensor<5x5xf32>) -> tuple<tensor<2x3xf32>>
+  ROOT %custom-call = (f32[2,3]) custom-call((f32[1,1], f32[2,3]) %arg1, f32[5,5] %arg2), custom_call_target="foo", output_to_operand_aliasing={{0}: (0, {1})}
 }
 
 // CHECK-LABEL:  func private @test_div(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<4xf32>
@@ -984,10 +1022,30 @@ add {
   // CHECK-NEXT:     mhlo.return [[ADD]]
   // CHECK-NEXT:   }) {
   // CHECK-SAME:           channel_handle = #mhlo.channel_handle<handle = 1, type = 0>
+  // CHECK-NOT: use_global_device_ids
   // CHECK-SAME{LITERAL}:  replica_groups = dense<[[0, 1]]> : tensor<1x2xi64>
+  // CHECK-NOT: use_global_device_ids
   // CHECK-SAME:           scatter_dimension = 1 : i64
+  // CHECK-NOT: use_global_device_ids
   // CHECK-SAME: } : (tensor<4x8xf32>) -> tensor<4x4xf32>
   ROOT ars = f32[4,4] reduce-scatter(input), channel_id=1, replica_groups={{0,1}}, dimensions={1}, to_apply=reduce_helper_add
+}
+
+// CHECK-LABEL:  func private @test_reduce_scatter_global
+// CHECK-SAME: ([[ARG0:%.*]]: tensor<4x8xf32>)
+%test_reduce_scatter_global {
+  input = f32[4,8] parameter(0)
+  // CHECK-NEXT: "mhlo.reduce_scatter"([[ARG0]]) ({
+  // CHECK-NEXT:   ^bb0([[BARG0:%.*]]: tensor<f32>, [[BARG1:%.*]]: tensor<f32>):
+  // CHECK-NEXT:     [[ADD:%.*]] = mhlo.add [[BARG0]], [[BARG1]] : tensor<f32>
+  // CHECK-NEXT:     mhlo.return [[ADD]]
+  // CHECK-NEXT:   }) {
+  // CHECK-SAME:           channel_handle = #mhlo.channel_handle<handle = 1, type = 0>
+  // CHECK-SAME{LITERAL}:  replica_groups = dense<[[0, 1]]> : tensor<1x2xi64>
+  // CHECK-SAME:           scatter_dimension = 1 : i64
+  // CHECK-SAME:           use_global_device_ids
+  // CHECK-SAME: } : (tensor<4x8xf32>) -> tensor<4x4xf32>
+  ROOT ars = f32[4,4] reduce-scatter(input), channel_id=1, replica_groups={{0,1}}, dimensions={1}, use_global_device_ids=true, to_apply=reduce_helper_add
 }
 
 
@@ -1505,6 +1563,12 @@ add {
   ROOT %domain.2 = u32[] domain(u32[] %Arg_0.1), domain={kind="sharding", entry={maximal device=1}, exit={}}
 }
 
+// CHECK-LABEL : func private @sparse
+// CHECK: tensor<10x10xf32, #sparse_tensor.encoding<{ dimLevelType = [ "dense", "compressed" ], pointerBitWidth = 32, indexBitWidth = 32 }>>) -> tensor<10x10xf32, #sparse_tensor.encoding<{ dimLevelType = [ "dense", "compressed" ], pointerBitWidth = 32, indexBitWidth = 32 }>>
+%sparse {
+  ROOT root = f32[10,10]{1,0:D(D,C)} parameter(0)
+}
+
 // CHECK-LABEL: func private @add_dependency
 // CHECK-SAME: (%[[ARG0:.*]]: tensor<4x4xf32>)
 %add_dependency (Arg_0.1: f32[4,4]) -> f32[4,4] {
@@ -1514,6 +1578,41 @@ add {
   // CHECK: mhlo.add_dependency %[[ARG0]], %[[TOK]] : (tensor<4x4xf32>, !mhlo.token) -> tensor<4x4xf32>
   ROOT %add-dep = f32[4,4] add-dependency(f32[4,4] %Arg_0.1, token[] %after-all)
 }
+
+// CHECK-LABEL: func private @AsyncOp
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<10xf32>)
+ %AsyncOp (p0.1: f32[10]) -> f32[20] {
+   %p0.1 = f32[10]{0} parameter(0)
+  // CHECK:  "mhlo.custom_call"
+   ROOT %custom-call = f32[20]{0} custom-call(f32[10]{0} %p0.1),
+                                  custom_call_target="foo"
+ }
+
+// CHECK-LABEL: func private @async
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<10xf32>)
+%async (p0: f32[10]) -> f32[20] {
+   %p0 = f32[10]{0} parameter(0)
+  // CHECK:  %[[START:.*]] = "mhlo.async_start"(%[[ARG0]])
+  // CHECK-SAME: called_computation = @AsyncOp
+  // CHECK-SAME: execution_thread = "main"
+  // CHECK-SAME: group_id = 1
+   %async-start = (f32[10]{0}, f32[20]{0}, s32[]) async-start(%p0),
+                                                    calls=%AsyncOp,
+                                                    async_group_id=1
+  // CHECK: %[[UPDATE:.*]] = "mhlo.async_update"(%[[START]])
+  // CHECK-SAME: called_computation = @AsyncOp
+  // CHECK-SAME: execution_thread = "main"
+  // CHECK-SAME: group_id = 1
+   %async-update = (f32[10]{0}, f32[20]{0}, s32[]) async-update(
+                                                         %async-start),
+                                                     calls=%AsyncOp,
+                                                     async_group_id=1
+  // CHECK: "mhlo.async_done"(%[[UPDATE]])
+  // CHECK-SAME: called_computation = @AsyncOp
+  // CHECK-SAME: execution_thread = "main"
+  // CHECK-SAME: group_id = 1
+   ROOT %async-done = f32[20]{0} async-done(%async-update), calls=%AsyncOp, async_group_id=1
+ }
 
 // CHECK-LABEL: func private @test_args_and_result_with_sharding
 // CHECK-SAME: ([[Arg:%.*]]: tensor<4xi32> {mhlo.sharding = "\08\03\1A\02\02\01\22\02\00\01"}) -> (tensor<4xi32> {mhlo.sharding = "\08\03\1A\02\02\01\22\02\00\01"})

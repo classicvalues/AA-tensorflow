@@ -16,7 +16,7 @@ limitations under the License.
 #include <memory>
 #include <string>
 
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"  // from @llvm-project
+#include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Dialect/Linalg/IR/Linalg.h"  // from @llvm-project
 #include "mlir/Dialect/MemRef/IR/MemRef.h"  // from @llvm-project
@@ -32,7 +32,7 @@ namespace {
 
 constexpr StringRef kPrintStringFuncName = "printCString";
 
-#define GEN_PASS_CLASSES
+#define GEN_PASS_DEF_EMBEDMEMREFPRINTSPASS
 #include "tensorflow/compiler/mlir/tools/kernel_gen/transforms/kernel_gen_passes.h.inc"
 
 Operation* EmitMemRefPrint(Location loc, Type element_type, Value arg,
@@ -116,7 +116,7 @@ SmallVector<Value> ExtractValuesToPrint(Operation* op) {
     return linalg.getOutputBufferOperands();
   }
   if (auto loop = dyn_cast<gml_st::LoopOp>(op)) {
-    return loop.outputs();
+    return loop.getOutputs();
   }
   if (auto loop = dyn_cast<scf::ForOp>(op)) {
     return loop.getIterOperands();
@@ -152,7 +152,7 @@ void EmitOperationPrint(Operation* op, OpBuilder* b) {
 
 // The pass inserts printing on every mutation of memrefs.
 struct EmbedMemRefPrintsPass
-    : public EmbedMemRefPrintsPassBase<EmbedMemRefPrintsPass> {
+    : public impl::EmbedMemRefPrintsPassBase<EmbedMemRefPrintsPass> {
   void runOnOperation() override {
     ModuleOp module = getOperation();
     module.walk([&](func::FuncOp func) {

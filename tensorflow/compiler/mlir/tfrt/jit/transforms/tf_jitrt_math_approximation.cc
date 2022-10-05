@@ -13,7 +13,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
@@ -24,7 +24,7 @@ limitations under the License.
 namespace tensorflow {
 namespace {
 
-#define GEN_PASS_CLASSES
+#define GEN_PASS_DEF_MATHAPPROXIMATION
 #include "tensorflow/compiler/mlir/tfrt/jit/transforms/tf_jitrt_passes.h.inc"
 
 using ::llvm::ArrayRef;
@@ -310,7 +310,7 @@ static void populateMathApproximationPatterns(RewritePatternSet &patterns,
 }
 
 struct MathApproximationPass
-    : public MathApproximationBase<MathApproximationPass> {
+    : public impl::MathApproximationBase<MathApproximationPass> {
   explicit MathApproximationPass(ArrayRef<std::string> approx_oplist) {
     this->oplist = approx_oplist;
   }

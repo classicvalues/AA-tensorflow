@@ -36,7 +36,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/status.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/core/platform/threadpool.h"
+#include "tensorflow/tsl/platform/threadpool.h"
 
 namespace xla {
 
@@ -154,7 +154,7 @@ class PyTpuClient : public std::enable_shared_from_this<PyTpuClient> {
 
   tpu_driver::TpuDriver* driver() { return driver_.get(); }
 
-  tensorflow::thread::ThreadPool* GetThreadPool() { return pool_.get(); }
+  tsl::thread::ThreadPool* GetThreadPool() { return pool_.get(); }
 
  protected:
   std::string platform_name_;
@@ -170,7 +170,7 @@ class PyTpuClient : public std::enable_shared_from_this<PyTpuClient> {
   int process_index_;
 
   // A thread pool for scheduling core executions in parallel.
-  std::unique_ptr<tensorflow::thread::ThreadPool> pool_;
+  std::unique_ptr<tsl::thread::ThreadPool> pool_;
 };
 
 // Manages a buffer shared amongst multiple users. Buffers are asynchronously
@@ -318,7 +318,14 @@ class PyTpuBuffer {
 class PyTpuToken {
  public:
   PyTpuToken() {}
-  Status Await() { return Status::OK(); }
+  Status Await() { return OkStatus(); }
+};
+
+class PyShardedTpuToken {
+ public:
+  PyShardedTpuToken() {}
+  Status Await() { return OkStatus(); }
+  PyTpuToken GetPyToken(int i) { return PyTpuToken(); }
 };
 
 // Represents a compiled computation that can be executed given handles to
@@ -399,18 +406,15 @@ class PyTpuExecutable {
       absl::Span<const std::vector<PyTpuBuffer*>> args);
 
   StatusOr<std::pair<std::vector<std::vector<std::unique_ptr<PyTpuBuffer>>>,
-                     std::vector<PyTpuToken>>>
+                     PyShardedTpuToken>>
   ExecuteShardedOnLocalDevicesWithTokens(
       absl::Span<const std::vector<PyTpuBuffer*>> args) {
     TF_ASSIGN_OR_RETURN(auto results, ExecuteShardedOnLocalDevices(args));
 
     TF_RET_CHECK(!args.empty());
-    int num_computations = args.front().size();
-    std::vector<PyTpuToken> tokens(num_computations);
-
     return std::pair<std::vector<std::vector<std::unique_ptr<PyTpuBuffer>>>,
-                     std::vector<PyTpuToken>>(std::move(results),
-                                              std::move(tokens));
+                     PyShardedTpuToken>(std::move(results),
+                                        PyShardedTpuToken());
   }
 
   void Delete() { executables_.clear(); }

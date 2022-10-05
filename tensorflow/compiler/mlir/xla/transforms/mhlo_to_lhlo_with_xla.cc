@@ -24,7 +24,7 @@ limitations under the License.
 #include "absl/types/optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"  // from @llvm-project
+#include "mlir/Dialect/Arith/IR/Arith.h"  // from @llvm-project
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"  // from @llvm-project
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Dialect/MemRef/IR/MemRef.h"  // from @llvm-project
@@ -129,11 +129,11 @@ Status OptimizeAndConvertHloToLmhlo(std::unique_ptr<HloModule> hlo_module,
   }
 
   xla::BackendOptions backend_options;
-  backend_options.set_platform(platform.ValueOrDie());
+  backend_options.set_platform(platform.value());
   auto backend_or_err = xla::Backend::CreateBackend(backend_options);
   TF_RETURN_WITH_CONTEXT_IF_ERROR(backend_or_err.status(),
                                   "failed to create XLA Backend ");
-  auto backend = std::move(backend_or_err.ValueOrDie());
+  auto backend = std::move(backend_or_err.value());
 
   StatusOr<std::unique_ptr<HloModule>> optimized_hlo_module;
 
@@ -162,7 +162,7 @@ Status OptimizeAndConvertHloToLmhlo(std::unique_ptr<HloModule> hlo_module,
       HloToLhloModule(**assignment, **optimized_hlo_module, module),
       "converting HLO to LHLO");
 
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 namespace {
@@ -172,10 +172,10 @@ namespace {
 class XlaHloToLhloPass
     : public PassWrapper<XlaHloToLhloPass, OperationPass<ModuleOp>> {
   void getDependentDialects(DialectRegistry& registry) const override {
-    registry
-        .insert<arith::ArithmeticDialect, bufferization::BufferizationDialect,
-                func::FuncDialect, memref::MemRefDialect, mhlo::MhloDialect,
-                lmhlo::LmhloDialect, lmhlo_gpu::LmhloGpuDialect>();
+    registry.insert<arith::ArithDialect, bufferization::BufferizationDialect,
+                    func::FuncDialect, memref::MemRefDialect, mhlo::MhloDialect,
+                    lmhlo::LmhloDialect, lmhlo_gpu::LmhloGpuDialect,
+                    sparse_tensor::SparseTensorDialect>();
   }
 
  public:
@@ -202,15 +202,14 @@ class XlaHloToLhloPass
       TF_RETURN_WITH_CONTEXT_IF_ERROR(
           ConvertMlirHloToHlo(module, &hlo_proto,
                               /*use_tuple_args=*/false,
-                              /*return_tuple=*/false,
-                              /*shape_determination_fns=*/{}),
+                              /*return_tuple=*/false),
           "conversion to XLA HLO proto failed");
 
       auto statusOrHloModule = HloModuleFromProto(hlo_proto);
       TF_RETURN_WITH_CONTEXT_IF_ERROR(statusOrHloModule.status(),
                                       "parsing HLO proto to HLO module failed");
       std::unique_ptr<HloModule> hlo_module =
-          std::move(statusOrHloModule.ValueOrDie());
+          std::move(statusOrHloModule.value());
 
       return OptimizeAndConvertHloToLmhlo(std::move(hlo_module), module,
                                           platform_, optimize_xla_hlo_);
@@ -250,7 +249,7 @@ Status LhloDialectEmitter::CreateOperands(
   TF_RETURN_IF_ERROR(
       GetOrCreateView(instr, &operands, /*result_subset=*/{}, token_mode));
   num_results = operands.size() - num_arguments;
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 template <typename OpType>
@@ -308,7 +307,7 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::CreateOpInFusion(
         GetI64DenseElementsAttr(dimensions));
 
     TF_RETURN_IF_ERROR(xla::HloFunctionImporter::ImportAsRegion(
-        *instr->called_computations()[0], &reduce_op.body(), &builder_,
+        *instr->called_computations()[0], &reduce_op.getBody(), &builder_,
         /*flatten_region_arg_tuple=*/true));
     op = reduce_op;
   } else {
@@ -453,6 +452,7 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
     case HloOpcode::kSlice:
     case HloOpcode::kSqrt:
     case HloOpcode::kSubtract:
+    case HloOpcode::kStochasticConvert:
     case HloOpcode::kTanh:
     case HloOpcode::kTranspose:
     case HloOpcode::kXor:
@@ -461,7 +461,7 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitOp(
       return CreateOpInFusion(instr);
     default:
       llvm::errs() << instr->ToString();
-      return tensorflow::errors::Internal(
+      return tsl::errors::Internal(
           absl::StrCat("LHLO opcode ", xla::HloOpcodeString(instr->opcode()),
                        " is not supported."));
   }
@@ -488,10 +488,10 @@ Status WalkTuplePostOrder(Value v,
                           const std::function<Status(Value)>& visitor) {
   if (auto* op = v.getDefiningOp()) {
     if (auto tuple = dyn_cast<mhlo::TupleOp>(op)) {
-      for (Value sub_v : tuple.val()) {
+      for (Value sub_v : tuple.getVal()) {
         TF_RETURN_IF_ERROR(WalkTuplePostOrder(sub_v, visitor));
       }
-      return ::tensorflow::OkStatus();
+      return ::tsl::OkStatus();
     }
   }
   return visitor(v);
@@ -576,7 +576,7 @@ StatusOr<lmhlo::FusionOp> LhloDialectEmitter::EmitFusionOp(
     TF_RETURN_IF_ERROR(GetOrCreateView(instr, &output));
     TF_RETURN_IF_ERROR(WalkTuplePostOrder(result, [&](Value v) mutable {
       region_builder.create<memref::TensorStoreOp>(loc, v, output[i++]);
-      return ::tensorflow::OkStatus();
+      return ::tsl::OkStatus();
     }));
     if (i != output.size()) {
       return xla::InternalError("output sizes don't match");
@@ -700,7 +700,7 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitCustomCallOp(
     return EmitCholesky(custom_call_instr);
   }
 
-  if (xla::gpu::IsCublasGemm(*instr)) {
+  if (xla::gpu::IsLegacyCublasMatmul(*instr)) {
     return EmitGemm(custom_call_instr);
   }
 
@@ -771,7 +771,7 @@ StatusOr<mlir::Operation*> LhloDialectEmitter::EmitCustomCallOp(
   const int32_t segments[2] = {static_cast<int32_t>(num_arguments),
                                static_cast<int32_t>(num_results)};
   custom_call->setAttr(lmhlo::CustomCallOp::getOperandSegmentSizeAttr(),
-                       builder_.getI32VectorAttr(segments));
+                       builder_.getDenseI32ArrayAttr(segments));
   if (target_mapping) custom_call.setTargetArgMappingAttr(target_mapping);
   return custom_call.getOperation();
 }
@@ -1011,7 +1011,7 @@ StatusOr<Operation*> LhloDialectEmitter::EmitDnnConvolution(
     auto activation_attr = ::mlir::lmhlo_gpu::ActivationAttr::get(
         getLocation(custom_call).getContext(), activation);
     op.setActivationModeAttr(activation_attr);
-    return ::tensorflow::OkStatus();
+    return ::tsl::OkStatus();
   };
 
   switch (kind) {
@@ -1137,7 +1137,7 @@ Status SetupCommonCollectiveOpAttributes(OpT op, const HloInstruction* instr,
   op.setConstrainLayoutAttr(
       builder.getBoolAttr(collective->constrain_layout()));
   SetupChannelIdAttribute(op, collective, builder);
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 }  // namespace
 
@@ -1373,7 +1373,7 @@ Status LhloDialectEmitter::ImportAsLmhloRegion(xla::HloComputation* computation,
   TF_RETURN_IF_ERROR(
       computation->AcceptOrdered(this, schedule->instructions()));
   builder_.create<lmhlo::TerminatorOp>(builder_.getUnknownLoc());
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 StatusOr<lmhlo::CaseOp> LhloDialectEmitter::EmitCaseOp(
@@ -1478,11 +1478,11 @@ StatusOr<Value> LhloDialectEmitter::GetOrCreateArrayView(
     SmallVector<int64_t, 4> out_strides;
     auto out_memref_type = out_type.dyn_cast<MemRefType>();
     if (!out_memref_type)
-      return tensorflow::errors::Internal(
+      return tsl::errors::Internal(
           "Expected memref type when creating a view for leaf type of a "
           "tuple.");
     if (failed(getStridesAndOffset(out_memref_type, out_strides, out_offset)))
-      return tensorflow::errors::Internal(
+      return tsl::errors::Internal(
           "Failed to get strides and offset from the output type.");
     result = builder_.create<memref::ReinterpretCastOp>(
         loc, out_memref_type, result, out_offset, out_memref_type.getShape(),
@@ -1503,13 +1503,13 @@ Status LhloDialectEmitter::GetOrCreateViewImpl(
                               current_shape_index, values, token_mode));
       current_shape_index->pop_back();
     }
-    return ::tensorflow::OkStatus();
+    return ::tsl::OkStatus();
   }
   if (current_shape.IsArray()) {
     TF_ASSIGN_OR_RETURN(auto v, GetOrCreateArrayView(instr, current_shape,
                                                      *current_shape_index));
     values->push_back(v);
-    return ::tensorflow::OkStatus();
+    return ::tsl::OkStatus();
   }
   if (current_shape.IsToken()) {
     switch (token_mode) {
@@ -1520,7 +1520,7 @@ Status LhloDialectEmitter::GetOrCreateViewImpl(
 
       case TokenLoweringMode::kUseNull:
         values->push_back(Value{});
-        return ::tensorflow::OkStatus();
+        return ::tsl::OkStatus();
     }
   }
   return xla::InternalError("Unexpected shape kind for %s and shape index %s",
@@ -1612,7 +1612,7 @@ Status LhloDialectEmitter::Initialize() {
         TF_RET_CHECK(slice.offset() == 0);
         TF_RET_CHECK(slice.size() == alloc->size());
         allocation_to_output_info[alloc] = std::make_pair(&sub_shape, index);
-        return ::tensorflow::OkStatus();
+        return ::tsl::OkStatus();
       }));
 
   // The function signature will be composed of:
@@ -1698,7 +1698,7 @@ Status LhloDialectEmitter::Initialize() {
       builder_.create<lmhlo::TerminatorOp>(builder_.getUnknownLoc());
   builder_ = OpBuilder(return_op);
 
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> createXlaHloToLhloWithXlaPass() {
@@ -1708,9 +1708,8 @@ std::unique_ptr<OperationPass<ModuleOp>> createXlaHloToLhloWithXlaPass() {
 Status HloToLhloModule(const BufferAssignment& assignment,
                        const HloModule& hlo_module, ModuleOp module) {
   module.getContext()
-      ->loadDialect<arith::ArithmeticDialect,
-                    bufferization::BufferizationDialect, func::FuncDialect,
-                    memref::MemRefDialect, mhlo::MhloDialect,
+      ->loadDialect<arith::ArithDialect, bufferization::BufferizationDialect,
+                    func::FuncDialect, memref::MemRefDialect, mhlo::MhloDialect,
                     lmhlo::LmhloDialect, lmhlo_gpu::LmhloGpuDialect>();
 
   module->setLoc(mlir::NameLoc::get(

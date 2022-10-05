@@ -18,15 +18,18 @@ limitations under the License.
 
 #include <utility>
 
-#include "mlir-hlo/Transforms/PassDetail.h"
 #include "mlir-hlo/Transforms/passes.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 namespace mlir {
+
+#define GEN_PASS_DEF_LOWERINDEXCASTPASS
+#include "mlir-hlo/Transforms/passes.h.inc"
+
 namespace {
 
 // index_cast is not defined on tensors, so lower it to a tensor.generate.
@@ -55,7 +58,8 @@ struct IndexCastConverter : public OpRewritePattern<arith::IndexCastOp> {
   }
 };
 
-struct LowerIndexCastPass : public LowerIndexCastPassBase<LowerIndexCastPass> {
+struct LowerIndexCastPass
+    : public impl::LowerIndexCastPassBase<LowerIndexCastPass> {
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<tensor::TensorDialect>();
   }

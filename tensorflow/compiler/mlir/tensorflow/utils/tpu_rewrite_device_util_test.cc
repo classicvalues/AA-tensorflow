@@ -328,7 +328,7 @@ TEST(TPURewriteDeviceUtilTest, ValidFullMeshDeviceAssignment) {
 
   TF_ASSERT_OK(status_or.status());
 
-  const auto& tpu_device_assignment = status_or.ValueOrDie();
+  const auto& tpu_device_assignment = status_or.value();
   EXPECT_EQ(tpu_device_assignment.compilation_device,
             "/job:worker/replica:0/task:0/device:CPU:0");
   const auto& tpu_devices = tpu_device_assignment.tpu_devices;
@@ -431,7 +431,7 @@ TEST(TPURewriteDeviceUtilTest, ValidGeneralDeviceAssignmentMesh2x2x2) {
 
   TF_ASSERT_OK(status_or.status());
 
-  const auto& tpu_device_assignment = status_or.ValueOrDie();
+  const auto& tpu_device_assignment = status_or.value();
   EXPECT_EQ(tpu_device_assignment.compilation_device,
             "/job:worker/replica:0/task:0/device:CPU:0");
   const auto& tpu_devices = tpu_device_assignment.tpu_devices;
@@ -544,7 +544,7 @@ TEST(TPURewriteDeviceUtilTest, ValidGeneralDeviceAssignmentMesh1x2x1x3) {
 
   TF_ASSERT_OK(status_or.status());
 
-  auto& tpu_device_assignment = status_or.ValueOrDie();
+  auto& tpu_device_assignment = status_or.value();
   EXPECT_EQ(tpu_device_assignment.compilation_device,
             "/job:worker/replica:0/task:0/device:CPU:0");
 
@@ -818,8 +818,8 @@ TEST(TPURewriteDeviceUtilTest, TestGetHostDeviceTPUReplicate) {
       mlir::UnknownLoc::get(&context), /*num_replicas=*/2, devices,
       llvm::ArrayRef<std::pair<mlir::ValueRange, mlir::Type>>{},
       mlir::ValueRange{}, mlir::TypeRange{});
-  builder.setInsertionPoint(&replicate.body().front(),
-                            replicate.body().front().begin());
+  builder.setInsertionPoint(&replicate.getBody().front(),
+                            replicate.getBody().front().begin());
 
   llvm::SmallVector<mlir::Type, 8> result_types;
   auto cluster = builder.create<mlir::tf_device::ClusterOp>(

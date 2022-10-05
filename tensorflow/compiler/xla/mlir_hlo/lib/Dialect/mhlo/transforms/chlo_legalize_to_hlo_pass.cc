@@ -13,25 +13,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "mlir-hlo/Dialect/mhlo/IR/chlo_ops.h"
 #include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
-#include "mlir-hlo/Dialect/mhlo/transforms/PassDetail.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/passes.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/rewriters.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Shape/IR/Shape.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Pass/Pass.h"
+#include "stablehlo/dialect/ChloOps.h"
 
 namespace mlir {
 namespace mhlo {
 
+#define GEN_PASS_DEF_CHLOLEGALIZETOHLOPASS
+#include "mlir-hlo/Dialect/mhlo/transforms/mhlo_passes.h.inc"
+
 namespace {
 
 struct ChloLegalizeToHloPass
-    : public ChloLegalizeToHloPassBase<ChloLegalizeToHloPass> {
+    : public impl::ChloLegalizeToHloPassBase<ChloLegalizeToHloPass> {
   explicit ChloLegalizeToHloPass(bool legalizeBroadcasts,
                                  bool expandCompositions)
       : ChloLegalizeToHloPassBase<
@@ -52,7 +54,7 @@ struct ChloLegalizeToHloPass
     // Consider the mhlo dialect legal for tests. Also add helper dialects
     // that are needed by the patterns.
     conversionTarget
-        .addLegalDialect<MhloDialect, mlir::arith::ArithmeticDialect,
+        .addLegalDialect<MhloDialect, mlir::arith::ArithDialect,
                          mlir::func::FuncDialect, mlir::tensor::TensorDialect,
                          mlir::shape::ShapeDialect, mlir::scf::SCFDialect>();
     conversionTarget.addLegalOp<chlo::MinimumBroadcastShapesOp>();

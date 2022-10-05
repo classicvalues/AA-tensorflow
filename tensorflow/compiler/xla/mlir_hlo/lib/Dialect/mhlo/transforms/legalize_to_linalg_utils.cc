@@ -23,10 +23,10 @@ limitations under the License.
 #include <string>
 #include <utility>
 
-#include "mlir-hlo/Dialect/mhlo/IR/chlo_ops.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/SparseTensor/IR/SparseTensor.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "stablehlo/dialect/ChloOps.h"
 
 namespace mlir {
 namespace mhlo {
@@ -35,13 +35,6 @@ namespace {
 bool hasIntegralShapeType(Operation* op) {
   auto stp = op->getOperand(0).getType().dyn_cast<ShapedType>();
   return stp && stp.getElementType().isIntOrIndex();
-}
-
-Value getInitSparseTensor(OpBuilder& b, Location loc, ShapedType type,
-                          ArrayRef<Value> dynSizes) {
-  return b.create<bufferization::AllocTensorOp>(loc, type, dynSizes,
-                                                /*copy=*/Value(),
-                                                /*memory_space=*/IntegerAttr());
 }
 
 }  // namespace
@@ -58,14 +51,21 @@ SmallVector<StringRef, 3> getNParallelLoopsAttrs(unsigned nParallelLoops) {
   return getParallelAndReductionIterators(nParallelLoops, 0);
 }
 
-Value getInitTensor(OpBuilder& b, Location loc, ShapedType type,
-                    ArrayRef<Value> dynSizes) {
-  return b.create<linalg::InitTensorOp>(loc, dynSizes, type.getShape(),
-                                        type.getElementType());
+Value getEmptySparseTensor(OpBuilder& b, Location loc, ShapedType type,
+                           ArrayRef<Value> dynSizes) {
+  return b.create<bufferization::AllocTensorOp>(loc, type, dynSizes,
+                                                /*copy=*/Value(),
+                                                /*memory_space=*/IntegerAttr());
 }
 
-Value getInitTensorFor(OpBuilder& b, Location loc, ShapedType resultType,
-                       Operation* op, ValueRange operands) {
+Value getEmptyTensor(OpBuilder& b, Location loc, ShapedType type,
+                     ArrayRef<Value> dynSizes) {
+  return b.create<tensor::EmptyOp>(loc, type.getShape(), type.getElementType(),
+                                   dynSizes);
+}
+
+Value getEmptyTensorFor(OpBuilder& b, Location loc, ShapedType resultType,
+                        Operation* op, ValueRange operands) {
   bool isSparse = sparse_tensor::getSparseTensorEncoding(resultType) != nullptr;
   // Collect the sizes for a ranked tensor to be passed as parameter to a
   // new tensor initialization operation. This operation only needs the
@@ -85,8 +85,8 @@ Value getInitTensorFor(OpBuilder& b, Location loc, ShapedType resultType,
           ValueRange{b.create<arith::ConstantIndexOp>(loc, en.index())}));
     }
   }
-  return isSparse ? getInitSparseTensor(b, loc, resultType, sizes)
-                  : getInitTensor(b, loc, resultType, sizes);
+  return isSparse ? getEmptySparseTensor(b, loc, resultType, sizes)
+                  : getEmptyTensor(b, loc, resultType, sizes);
 }
 
 Value preSparsify(Operation* op, llvm::SmallVector<Value, 2>& values, Type rtp,
@@ -97,7 +97,8 @@ Value preSparsify(Operation* op, llvm::SmallVector<Value, 2>& values, Type rtp,
       (isa<mhlo::AbsOp>(op) && hasIntegralShapeType(op)) ||
       isa<chlo::AsinOp>(op) || isa<chlo::AsinhOp>(op) ||
       isa<chlo::AtanOp>(op) || isa<chlo::AtanhOp>(op) ||
-      isa<chlo::BesselI1eOp>(op)) {
+      isa<chlo::BesselI1eOp>(op) || isa<chlo::SinhOp>(op) ||
+      isa<chlo::TanOp>(op)) {
     if (!sparse_tensor::getSparseTensorEncoding(op->getResult(0).getType()) &&
         !sparse_tensor::getSparseTensorEncoding(op->getOperand(0).getType()))
       return Value();

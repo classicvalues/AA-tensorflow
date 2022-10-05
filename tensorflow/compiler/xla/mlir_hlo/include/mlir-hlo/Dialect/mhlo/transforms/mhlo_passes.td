@@ -31,8 +31,14 @@ def ChloLegalizeToLinalgPass : Pass<"sparse-chlo-legalize-to-linalg", "func::Fun
   let constructor = "createLegalizeSparseChloToLinalgPass()";
 }
 
+def HloCanonicalizeScatterPass : Pass<"hlo-canonicalize-scatter", "func::FuncOp"> {
+  let summary = "Rewrites scatter into transposes, reshapes and a simple scatter.";
+  let constructor = "createHloCanonicalizeScatterPass()";
+  let dependentDialects = ["mhlo::MhloDialect", "tensor::TensorDialect"];
+}
+
 def HloCanonicalizeReductionPass : Pass<"hlo-canonicalize-reduction", "func::FuncOp"> {
-  let summary = "canonicalize reduction ops to be suitable for codegen.";
+  let summary = "Canonicalize reduction ops to be suitable for codegen.";
   let constructor = "createHloCanonicalizeReductionPass()";
 }
 
@@ -54,7 +60,7 @@ def HloLegalizeToArithmeticPass :Pass<"hlo-legalize-to-arithmetic", "ModuleOp"> 
 def HloLegalizeSortPass : Pass<"hlo-legalize-sort", "func::FuncOp"> {
   let summary = "Legalize from MHLO sort to SCF control flow.";
   let constructor = "createLegalizeSortPass()";
-  let dependentDialects = ["arith::ArithmeticDialect", "scf::SCFDialect",
+  let dependentDialects = ["arith::ArithDialect", "scf::SCFDialect",
                            "tensor::TensorDialect"];
 }
 
@@ -93,6 +99,17 @@ def HloLegalizeToLinalgPass : Pass<"hlo-legalize-to-linalg", "func::FuncOp"> {
 def LegalizeMHLOToTHLOPass : Pass<"legalize-mhlo-to-thlo", "mlir::func::FuncOp"> {
   let summary = "Legalize from HLO dialect to tHLO dialect.";
   let constructor = "::mlir::mhlo::createLegalizeMHLOToTHLOPass()";
+  let options =
+      [Option<"enableExperimental", "enable-experimental", "bool",
+              /*default=*/"false",
+              "Enable conversion to operations that are still under "
+              "developement and might not be working in some pipelines. For "
+              "example, thlo.map and thlo.transpose.">];
+  let dependentDialects = [
+    "arith::ArithDialect", "complex::ComplexDialect",
+    "linalg::LinalgDialect", "math::MathDialect", "shape::ShapeDialect",
+    "tensor::TensorDialect", "thlo::THLODialect"
+  ];
 }
 
 def HloLegalizeShapeComputationsPass : Pass<"hlo-legalize-shape-computations", "func::FuncOp"> {
@@ -227,7 +244,7 @@ def TestUnfuseBatchNormPass : Pass<"mhlo-test-unfuse-batch-norm", "func::FuncOp"
   let summary = "Test pass for materializing 'broadcast_dimensions' attributes.";
   let constructor = "createTestUnfuseBatchNormPass()";
 
-  let dependentDialects = ["arith::ArithmeticDialect", "shape::ShapeDialect", "tensor::TensorDialect"];
+  let dependentDialects = ["arith::ArithDialect", "shape::ShapeDialect", "tensor::TensorDialect"];
 }
 
 def ExpandHloTuplesPass : Pass<"expand-hlo-tuples", "ModuleOp"> {
@@ -278,4 +295,16 @@ def CollapseElementwiseMapPass
     : Pass<"mhlo-collapse-elementwise-map", "func::FuncOp"> {
   let summary = "Collapse the mhlo.map if the map only has elementwise ops.";
   let constructor = "createCollapseElementwiseMapPass()";
+}
+
+def HloLegalizeToStablehloPass : Pass<"hlo-legalize-to-stablehlo", "ModuleOp"> {
+  let summary = "Legalize HLO to StableHLO.";
+  let constructor = "createHloLegalizeToStablehloPass()";
+  let dependentDialects = ["stablehlo::StablehloDialect"];
+}
+
+def StablehloLegalizeToHloPass : Pass<"stablehlo-legalize-to-hlo", "ModuleOp"> {
+  let summary = "Legalize StableHLO to HLO.";
+  let constructor = "createStablehloLegalizeToHloPass()";
+  let dependentDialects = ["mhlo::MhloDialect"];
 }

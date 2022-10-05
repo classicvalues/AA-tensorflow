@@ -14,9 +14,8 @@ limitations under the License.
 ==============================================================================*/
 
 #include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
-#include "mlir-hlo/Dialect/mhlo/transforms/PassDetail.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/rewriters.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/IR/Operation.h"
@@ -27,10 +26,14 @@ limitations under the License.
 namespace mlir {
 namespace mhlo {
 
+#define GEN_PASS_DEF_TESTMATERIALIZEBROADCASTSPASS
+#include "mlir-hlo/Dialect/mhlo/transforms/mhlo_passes.h.inc"
+
 namespace {
 
 struct TestMaterializeBroadcastsPass
-    : public TestMaterializeBroadcastsPassBase<TestMaterializeBroadcastsPass> {
+    : public impl::TestMaterializeBroadcastsPassBase<
+          TestMaterializeBroadcastsPass> {
   void runOnOperation() override {
     ConversionTarget conversionTarget(getContext());
     RewritePatternSet conversionPatterns(&getContext());
@@ -39,7 +42,7 @@ struct TestMaterializeBroadcastsPass
     conversionTarget.addLegalDialect<MhloDialect>();
     // The conversion uses helpers from the Standard dialect.
     conversionTarget
-        .addLegalDialect<arith::ArithmeticDialect, mlir::func::FuncDialect>();
+        .addLegalDialect<arith::ArithDialect, mlir::func::FuncDialect>();
 
     setupMaterializeBroadcastsLegality(&getContext(), &conversionTarget);
     populateMaterializeBroadcastsPatterns(&getContext(), &conversionPatterns);

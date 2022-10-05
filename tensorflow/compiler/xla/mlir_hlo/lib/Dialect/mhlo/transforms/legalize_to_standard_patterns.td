@@ -16,7 +16,7 @@ limitations under the License.
 // This is the legalization pattern definition file for MHLO to StandardOps.
 
 include "mlir/IR/OpBase.td"
-include "mlir/Dialect/Arithmetic/IR/ArithmeticOps.td"
+include "mlir/Dialect/Arith/IR/ArithOps.td"
 include "mlir/Dialect/Math/IR/MathOps.td"
 include "mlir/Dialect/Func/IR/FuncOps.td"
 include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.td"
@@ -79,6 +79,6 @@ def : Pat<(HLO_RemOp HLO_IntTensor:$l, HLO_IntTensor:$r),
           (Arith_RemSIOp $l, $r),
           [(IsSameSizeConstraint $l, $r)]>;
 
-def : Pat<(HLO_SelectOp HLO_PredTensor:$pred, HLO_Tensor:$tv, HLO_Tensor:$fv),
+def : Pat<(HLO_SelectOp $pred, $tv, $fv),
           (SelectOp $pred, $tv, $fv),
           [(IsSameSizeConstraint $pred, $tv), (IsSameSizeConstraint $tv, $fv)]>;

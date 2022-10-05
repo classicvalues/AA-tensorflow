@@ -1,5 +1,5 @@
 load("//tensorflow/lite:build_def.bzl", "tflite_copts")
-load("//tensorflow:tensorflow.bzl", "get_compatible_with_portable")
+load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -17,6 +17,34 @@ cc_library(
         ":telemetry_status",
         "//tensorflow/lite/c:common",
         "//tensorflow/lite/core/api",
+    ],
+)
+
+cc_library(
+    name = "telemetry",
+    srcs = ["telemetry.cc"],
+    hdrs = ["telemetry.h"],
+    compatible_with = get_compatible_with_portable(),
+    copts = tflite_copts(),
+    deps = [
+        ":telemetry_settings",
+        ":telemetry_status",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/c:common",
+        "//tensorflow/lite/core/api",
+    ],
+)
+
+cc_test(
+    name = "telemetry_test",
+    srcs = ["telemetry_test.cc"],
+    deps = [
+        ":profiler",
+        ":telemetry",
+        ":telemetry_status",
+        "//tensorflow/lite/c:c_api_types",
+        "//tensorflow/lite/c:common",
+        "@com_google_googletest//:gtest_main",
     ],
 )
 

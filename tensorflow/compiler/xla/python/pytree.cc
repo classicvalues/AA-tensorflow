@@ -19,7 +19,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/python/pytree.h"
 
 #include <algorithm>
+#include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -36,7 +38,7 @@ limitations under the License.
 #include "pybind11/stl.h"
 #include "pybind11_abseil/absl_casters.h"  // from @pybind11_abseil
 #include "tensorflow/compiler/xla/python/exceptions.h"
-#include "tensorflow/core/platform/logging.h"
+#include "tensorflow/tsl/platform/logging.h"
 
 namespace xla {
 
@@ -134,8 +136,8 @@ void PyTreeDef::FlattenIntoImpl(
     py::handle handle, T& leaves,
     const std::optional<py::function>& leaf_predicate) {
   Node node;
-  int start_num_nodes = traversal_.size();
-  int start_num_leaves = leaves.size();
+  const int start_num_nodes = traversal_.size();
+  const int start_num_leaves = leaves.size();
   if (leaf_predicate && (*leaf_predicate)(handle).cast<bool>()) {
     leaves.push_back(py::reinterpret_borrow<py::object>(handle));
   } else {

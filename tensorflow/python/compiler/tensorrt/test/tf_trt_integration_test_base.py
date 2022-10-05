@@ -280,7 +280,8 @@ class TfTrtIntegrationTestBase(test_util.TensorFlowTestCase):
         # We use the minimum of all the batch sizes, so when multiple different
         # input shapes are provided it'll always create new engines in the
         # cache, and we can therefore test the cache behavior.
-        max_workspace_size_bytes=1 << 25,
+        max_workspace_size_bytes=(
+            trt_convert.DEFAULT_TRT_MAX_WORKSPACE_SIZE_BYTES),
         precision_mode=run_params.precision_mode,
         minimum_segment_size=2,
         maximum_cached_engines=1,
@@ -414,9 +415,9 @@ class TfTrtIntegrationTestBase(test_util.TensorFlowTestCase):
             for i in range(len(params.input_specs))
         }
         new_val = func(**feed_dict)
-        assert isinstance(new_val, dict), (
-            f"Invalid type for `new_val`, expected `dict`. Got: {type(new_val)}."
-        )
+        assert isinstance(
+            new_val, dict), (f"Invalid type for `new_val`, expected `dict`. "
+                             f"Got: {type(new_val)}.")
         # The key of the output map is always like output_i.
         new_val = [new_val[key] for key in sorted(new_val)]
         # Each element is an eager Tensor, and accessing individual elements is
@@ -495,8 +496,8 @@ class TfTrtIntegrationTestBase(test_util.TensorFlowTestCase):
         f"{conversion_params.precision_mode}.")
     assert run_params.dynamic_engine, "dynamic_engine parameter must be True."
     assert conversion_params.maximum_cached_engines == 1, (
-        f"maximum_cached_engines: {conversion_params.maximum_cached_engines} == 1"
-    )
+        f"maximum_cached_engines: {conversion_params.maximum_cached_engines} "
+        f"== 1")
     assert conversion_params.use_calibration, "use_calibration must be True."
 
     # We only support calibrating single engine.
@@ -619,8 +620,8 @@ class TfTrtIntegrationTestBase(test_util.TensorFlowTestCase):
       has_prefix = match and value.startswith(match.group(0))
       assert (not expecting_prefix) or has_prefix, (
           f"Expect (not expecting_prefix) or has_prefix but got: "
-          f"- expecting_prefix = {expecting_prefix}\n- has_prefix = {has_prefix}"
-      )
+          f"- expecting_prefix = {expecting_prefix}\n"
+          f"- has_prefix = {has_prefix}")
       if has_prefix:
         parts = value.split("_", maxsplit=2)
         assert len(parts) == 3, (
@@ -1026,15 +1027,14 @@ class TfTrtIntegrationTestBase(test_util.TensorFlowTestCase):
         current_input_data = []
         for spec, np_shape in zip(input_specs, dim_list):
           np_dtype = spec.dtype.as_numpy_dtype()
-          # Multiply the input by some constant to avoid all zeros input for
-          # integer types.
-          scale = 10.0 if np.issubdtype(np_dtype, np.integer) else 1.0
-          # TODO(laigd): add debug options. E.g. we can set the input data to be
-          # continuous natural numbers:
-          # seq = np.arange(np.prod(np_shape))
-          # seq.resize(np_shape)
-          # current_inputs_data.append(scale * seq.astype(np_dtype))
-          data = (scale * np.random.random_sample(np_shape)).astype(np_dtype)
+          if not np.issubdtype(np_dtype, np.bool_):
+            # Multiply the input by some constant to avoid all zeros input for
+            # integer types.
+            scale = 10.0 if np.issubdtype(np_dtype, np.integer) else 1.0
+            data = (scale * np.random.random_sample(np_shape)).astype(np_dtype)
+          else:
+            data = np.random.choice(a=[False, True], size=np_shape)
+
           if run_params.is_v2:
             with ops.device("/GPU:0"):
               data = ops.convert_to_tensor(data)
@@ -1139,12 +1139,11 @@ def _GetTest(run_params):
   """Gets a single test method based on the parameters."""
 
   def _Test(self):
-    logging.info(
-        "Running test %s with parameters: convert_online=%s, "
-        "precision_mode=%s, dynamic_engine=%s, dynamic_shape_mode%s",
-        run_params.test_name, run_params.convert_online,
-        run_params.precision_mode, run_params.dynamic_engine,
-        run_params.dynamic_shape)
+    logging.info(f"Running test `{run_params.test_name}` with parameters: "
+                 f"convert_online={run_params.convert_online}, "
+                 f"precision_mode={run_params.precision_mode}, "
+                 f"dynamic_engine={run_params.dynamic_engine}, "
+                 f"dynamic_shape={run_params.dynamic_shape}")
     self.RunTest(run_params)
 
   return _Test

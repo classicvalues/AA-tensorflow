@@ -22,9 +22,9 @@ add_mlir_dialect_library(THLODialect
   DEPENDS
   MLIRthlo_opsIncGen
   MLIRGmlStComposeSetInterfaceIncGen
-  MLIRGmlStFusionInterfaceIncGen
 
   LINK_LIBS PUBLIC
+  GmlStDialect
   MLIRIR
   MLIRMemRefDialect
   MLIRSideEffectInterfaces

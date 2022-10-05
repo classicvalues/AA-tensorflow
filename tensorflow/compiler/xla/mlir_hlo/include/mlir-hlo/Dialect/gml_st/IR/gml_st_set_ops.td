@@ -35,18 +35,17 @@ def GMLST_TileType : GMLST_Set<"Tile"> {
   let assemblyFormat = "`<` custom<ShapeTypeDimensionsList>($shape) `>`";
   let extraClassDeclaration = [{
     unsigned getRank() const { return getShape().size(); }
+    bool hasStaticShape() const {
+      return llvm::none_of(getShape(), ShapedType::isDynamic);
+    }
+    int64_t getNumElements() const {
+      return ShapedType::getNumElements(getShape());
+    }
   }];
 }
 
-def GMLST_PointType : GMLST_Set<"Point">,
-    BuildableType<"$_builder.getType<::mlir::gml_st::PointType>()"> {
-  let mnemonic = "point";
-  let summary = "Type that represents a point of an index space.";
-  let assemblyFormat = "";
-}
-
 // Whether a type is a subset type.
-def IsSetTypePred : Or<[GMLST_TileType.predicate, GMLST_PointType.predicate]>;
+def IsSetTypePred : Or<[GMLST_TileType.predicate]>;
 
 def AnySet : Type<IsSetTypePred, "subset type">;
 
@@ -56,7 +55,8 @@ def GMLST_SpaceOp : GMLST_Op<"space", [NoSideEffect,
                        I64ArrayAttr:$static_sizes);
   let results = (outs GMLST_TileType:$result);
   let assemblyFormat = [{
-    custom<OperandsOrIntegersSizesList>($dynamic_sizes, $static_sizes)
+    custom<DynamicIndexList>($dynamic_sizes, $static_sizes,
+                               "ShapedType::kDynamicSize")
     attr-dict `:` qualified(type($result))
   }];
   let builders = [
@@ -70,27 +70,6 @@ def GMLST_SpaceOp : GMLST_Op<"space", [NoSideEffect,
   let hasVerifier = 1;
 }
 
-def GMLST_PointOp : GMLST_Op<"point", [
-    NoSideEffect,
-    DeclareOpInterfaceMethods<ComposeSetInterface>]> {
-  let arguments = (ins GMLST_TileType:$superset,
-                       Variadic<Index>:$dynamic_indices,
-                       I64ArrayAttr:$static_indices);
-  let results = (outs GMLST_PointType:$result);
-  let assemblyFormat = [{
-    $superset
-    custom<OperandsOrIntegersOffsetsOrStridesList>($dynamic_indices, $static_indices)
-    attr-dict `:` qualified(type($superset)) `to` qualified(type($result))
-  }];
-  let builders = [
-    OpBuilder<(ins "Value":$superset, "ArrayRef<OpFoldResult>":$offsets,
-                   CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
-  ];
-  let extraClassDeclaration = [{
-    unsigned getRank() { return static_indices().size(); }
-  }];
-  let hasVerifier = 1;
-}
 
 def GMLST_TileOp : GMLST_Op<"tile", [
     NoSideEffect,
@@ -108,9 +87,12 @@ def GMLST_TileOp : GMLST_Op<"tile", [
   let results = (outs GMLST_TileType:$result);
   let assemblyFormat = [{
     $superset
-    custom<OperandsOrIntegersOffsetsOrStridesList>($offsets, $static_offsets)
-    custom<OperandsOrIntegersSizesList>($sizes, $static_sizes)
-    custom<OperandsOrIntegersOffsetsOrStridesList>($strides, $static_strides)
+    custom<DynamicIndexList>($offsets, $static_offsets,
+                               "ShapedType::kDynamicStrideOrOffset")
+    custom<DynamicIndexList>($sizes, $static_sizes,
+                               "ShapedType::kDynamicSize")
+    custom<DynamicIndexList>($strides, $static_strides,
+                               "ShapedType::kDynamicStrideOrOffset")
     attr-dict `:` qualified(type($superset)) `to` qualified(type($result))
   }];
   let builders = [
@@ -122,7 +104,7 @@ def GMLST_TileOp : GMLST_Op<"tile", [
     /// Return the expected rank of each of the`static_offsets`, `static_sizes`
     /// and `static_strides` attributes.
     std::array<unsigned, 3> getArrayAttrMaxRanks() {
-      unsigned rank = superset().getType().cast<TileType>().getRank();
+      unsigned rank = getSuperset().getType().cast<TileType>().getRank();
       return {rank, rank, rank};
     }
     /// Return the number of leading operands before the `offsets`, `sizes` and
@@ -141,7 +123,7 @@ def GMLST_DropDimsOp : GMLST_Op<"drop_dims", [
   }];
   let description = [{
     Selects specific dimensions of a subset and drops the remaining ones. The
-    result is a tile or point in a space of smaller rank, which is implicitly
+    result is a tile in a space of smaller rank, which is implicitly
     defined by the root space.
   }];
   let arguments = (ins

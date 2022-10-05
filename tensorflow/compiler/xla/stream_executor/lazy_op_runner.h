@@ -143,7 +143,7 @@ struct FusedConvOp {
   struct Config {
     ConvolutionKind kind;
     DataType input_type, bias_type, output_type;
-    double conv_scale, side_input_scale;
+    double conv_scale, side_input_scale, leakyrelu_alpha;
     const BatchDescriptor& input_descriptor;
     const FilterDescriptor& filter_descriptor;
     const BatchDescriptor& bias_descriptor;
@@ -158,9 +158,26 @@ struct FusedConvOp {
     return stream->FusedConvolveRunnerFromDesc(
         desc, config.kind, config.input_type, config.bias_type,
         config.output_type, config.conv_scale, config.side_input_scale,
-        config.input_descriptor, config.filter_descriptor,
-        config.bias_descriptor, config.output_descriptor,
-        config.convolution_descriptor, config.activation_mode);
+        config.leakyrelu_alpha, config.input_descriptor,
+        config.filter_descriptor, config.bias_descriptor,
+        config.output_descriptor, config.convolution_descriptor,
+        config.activation_mode);
+  }
+};
+
+// Implementation of the concept required by LazyOpRunner, for FusedMatmul.
+struct FusedMatmulOp {
+  using Signature = FusedMatmulSignature;
+
+  // Config is mainly used in RunnerFromAlgorithmDesc() to lazily create the
+  // runner. At this moment we only get existing runners and don't implement
+  // this feature.
+  struct Config {};
+
+  static port::StatusOr<std::unique_ptr<const OpRunner<Signature>>>
+  RunnerFromAlgorithmDesc(const AlgorithmDesc& desc, Config config,
+                          Stream* stream) {
+    return port::UnimplementedError("Unimplemented");
   }
 };
 

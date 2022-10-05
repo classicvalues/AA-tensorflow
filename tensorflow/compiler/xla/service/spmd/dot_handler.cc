@@ -122,7 +122,7 @@ struct DotDimensionIndexMapping {
 void UpdateDDNums(DotDimensionNumbers* new_ddnums, int64_t reshaped_dim,
                   bool lhs) {
   auto update_dims =
-      [&reshaped_dim](tensorflow::protobuf::RepeatedField<int64_t>* dims) {
+      [&reshaped_dim](tsl::protobuf::RepeatedField<int64_t>* dims) {
         bool add_reshaped_dim = false;
         if (absl::c_linear_search(*dims, reshaped_dim)) {
           add_reshaped_dim = true;
@@ -465,7 +465,7 @@ std::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
     rhs = original_hlo->operand(1);
   }
 
-  // Determine if any of the users users have the same shardings that can allow
+  // Determine if any of the users have the same shardings that can allow
   // reuse of the resharding for the operand with original_hlo.
   auto check_users_sharding = [original_hlo](
                                   const HloInstruction* to_loop_over) {
@@ -541,7 +541,7 @@ std::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
                                .Reshard(HloSharding::Replicate())
                          : *partitioned_rhs;
       dot = create_sharded_dot(new_lhs.hlo(), new_rhs.hlo(), b, conv_window)
-                .ValueOrDie();
+                .value();
       computation_time_in_ms = visitor->GetComputationTimeInMilliSec(dot);
 
       collective = lhs_needs_ag ? new_lhs.hlo() : new_rhs.hlo();
@@ -581,7 +581,7 @@ std::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
       new_rhs = new_rhs.PadWithZero();
 
       dot = create_sharded_dot(new_lhs.hlo(), new_rhs.hlo(), b, conv_window)
-                .ValueOrDie();
+                .value();
       computation_time_in_ms = visitor->GetComputationTimeInMilliSec(dot);
 
       std::vector<int64_t> lhs_contracting_dims;
@@ -593,6 +593,9 @@ std::optional<WindowedEinsumConfig> GetWindowedEinsumConfiguration(
           b, dot, new_lhs.sharding(), new_lhs.state().next_channel_id,
           lhs_contracting_dims, new_lhs.state().collective_ops_creator,
           MakeBinaryAdd(dot->shape().element_type(), module));
+      if (collective->opcode() == HloOpcode::kConvert) {
+        collective = collective->mutable_operand(0);
+      }
       communication_time_in_ms = visitor->GetCommunicationTimeInMilliSec(
           ShapeUtil::ByteSizeOf(dot->shape()), collective->replica_groups());
     }
@@ -3037,6 +3040,13 @@ bool PrioritizeContractingDimensionsPartitioning(
         lhs_contracting_partitions > 1)) {
     return false;
   }
+
+  // Return false if lhs/rhs sharding would have to be transposed.
+  if (RequiresTransposeSharding(lhs.hlo()->sharding(), rhs.hlo()->sharding(),
+                                dims_mapping.contracting_dims)) {
+    return false;
+  }
+
   // Estimate the iterations in the case we perform the partitioning on the
   // contracting dimensions instead.
   std::vector<int64_t> lhs_dims;
@@ -3179,7 +3189,7 @@ bool PrioritizeContractingDimensionsPartitioning(
       create_sharded_dot(lhs_matching_iterations ? lhs.hlo() : other_hlo,
                          lhs_matching_iterations ? other_hlo : rhs.hlo(), b,
                          conv_window)
-          .ValueOrDie();
+          .value();
   const double computation_time_in_ms =
       visitor->GetComputationTimeInMilliSec(dot);
   *other_hlo->mutable_shape() = other_original_shape;
@@ -3299,8 +3309,7 @@ bool LhsIsBestMatchForNonContractingPartitioning(
       *compute_rhs->mutable_shape() =
           GetPerGroupBaseShape(rhs_grouped, rhs.base_shape());
       HloInstruction* dot =
-          create_sharded_dot(compute_lhs, compute_rhs, b, conv_window)
-              .ValueOrDie();
+          create_sharded_dot(compute_lhs, compute_rhs, b, conv_window).value();
       const double computation_time_in_ms =
           visitor->GetComputationTimeInMilliSec(dot);
       *compute_lhs->mutable_shape() = lhs_original_shape;

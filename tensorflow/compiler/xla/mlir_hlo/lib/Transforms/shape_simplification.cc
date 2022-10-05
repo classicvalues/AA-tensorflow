@@ -21,9 +21,8 @@ limitations under the License.
 
 #include "llvm/ADT/Optional.h"
 #include "mlir-hlo/Dialect/mhlo/IR/hlo_ops.h"
-#include "mlir-hlo/Transforms/PassDetail.h"
 #include "mlir-hlo/Transforms/passes.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Shape/IR/Shape.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -32,6 +31,9 @@ limitations under the License.
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 namespace mlir {
+
+#define GEN_PASS_DEF_SHAPESIMPLIFICATION
+#include "mlir-hlo/Transforms/passes.h.inc"
 
 namespace {
 
@@ -216,9 +218,9 @@ struct ExtractFromBroadcastedTensorCanonicalizationPattern
 };
 
 struct ShapeSimplification
-    : public ShapeSimplificationBase<ShapeSimplification> {
+    : public impl::ShapeSimplificationBase<ShapeSimplification> {
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<mlir::arith::ArithmeticDialect>();
+    registry.insert<mlir::arith::ArithDialect>();
     registry.insert<mhlo::MhloDialect>();
     registry.insert<mlir::func::FuncDialect>();
     registry.insert<shape::ShapeDialect>();

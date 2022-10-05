@@ -89,6 +89,96 @@ absl::Status TestLinkingConvolution2InputMul2InputBroadcastMul(
 absl::Status TestLinkingConvolution2InputMul2InputMulCos(
     TestExecutionEnvironment* env);
 
+//      input
+//        |
+//   convolution
+//     /     \
+//   tanh     |
+//     \     /
+//  substraction
+//        |
+//     output
+absl::Status TestLinkingConvolutionFirstTanh2InputDiff(
+    TestExecutionEnvironment* env);
+
+//      input
+//        |
+//   convolution
+//     /     \
+//    |     tanh
+//     \     /
+//  substraction
+//        |
+//     output
+absl::Status TestLinkingConvolutionSecondTanh2InputDiff(
+    TestExecutionEnvironment* env);
+
+//      input
+//        |
+//   convolution
+//     /     \
+//   tanh    cos
+//     \     /
+//  substraction
+//        |
+//     output
+absl::Status TestLinkingConvolutionFirstTanhSecondCos2InputDiff(
+    TestExecutionEnvironment* env);
+
+//      input
+//        |
+//   convolution
+//      /    \
+//   tanh    cos
+//    /     /   \
+//   |    prelu  sin
+//   |      \   /
+//   |       pow
+//   |        |
+//   |       exp
+//    \       |
+//  substraction
+//        |
+//     output
+absl::Status TestLinkingComplex0(TestExecutionEnvironment* env);
+
+//                input1
+//                  |
+//              convolution
+//                  |
+//         input0  cos
+//             \   /
+//              add
+//               |
+//              cos
+//               |
+//              sin
+//               |
+//              abs
+//               |
+//             output
+absl::Status TestLinkingConvElem2InputAddElemsOp(TestExecutionEnvironment* env);
+
+//     input1
+//       |
+//     slice
+//       |
+//      cast
+//       |
+//     output
+absl::Status TestLinkingSliceCastOp(TestExecutionEnvironment* env);
+
+//       input
+//         |
+//      Reshape
+//       /   \
+//     Add   Add
+//       \   /
+//        Mul
+//         |
+//       output
+absl::Status TestLinkingAddAddMulOp(TestExecutionEnvironment* env);
+
 }  // namespace gpu
 }  // namespace tflite
 

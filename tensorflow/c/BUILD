@@ -17,10 +17,10 @@ load(
 load("@local_config_tensorrt//:build_defs.bzl", "if_tensorrt")
 
 # buildifier: disable=same-origin-load
-load("//tensorflow:tensorflow.bzl", "filegroup")
+load("//tensorflow:tensorflow.default.bzl", "filegroup")
 
 # buildifier: disable=same-origin-load
-load("//tensorflow:tensorflow.bzl", "tf_cuda_cc_test")
+load("//tensorflow:tensorflow.default.bzl", "tf_cuda_cc_test")
 
 package(
     licenses = ["notice"],
@@ -678,7 +678,7 @@ tf_cuda_library(
         "//conditions:default": [
             ":c_api_internal",
             ":tf_tensor",
-            "//tensorflow/stream_executor:stream",
+            "//tensorflow/compiler/xla/stream_executor:stream_executor",
             "//tensorflow/core:framework",
             "//tensorflow/core:framework_lite",
             "//tensorflow/core:protos_all_cc",

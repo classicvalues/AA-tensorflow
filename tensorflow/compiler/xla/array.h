@@ -24,6 +24,7 @@ limitations under the License.
 #include <memory>
 #include <numeric>
 #include <random>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -32,8 +33,7 @@ limitations under the License.
 #include "absl/types/span.h"
 #include "tensorflow/compiler/xla/status.h"
 #include "tensorflow/compiler/xla/types.h"
-#include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/core/platform/logging.h"
+#include "tensorflow/tsl/platform/logging.h"
 
 namespace xla {
 
@@ -362,7 +362,7 @@ class Array {
 
   // Invokes a callback with the (indices, value_ptr) for each cell in the
   // array. If a callback returns a non-OK status, returns that else returns
-  // Status::OK().
+  // OkStatus().
   Status EachStatus(std::function<Status(absl::Span<const int64_t>, T*)> f) {
     std::vector<int64_t> index(sizes_.size());
     for (int64_t i = 0; i < num_elements(); ++i, next_index(&index)) {
@@ -376,7 +376,7 @@ class Array {
 
   // Invokes a callback with the (indices, value) for each cell in the array.
   // If a callback returns a non-OK status, returns that else returns
-  // Status::OK().
+  // OkStatus().
   Status EachStatus(
       std::function<Status(absl::Span<const int64_t>, T)> f) const {
     std::vector<int64_t> index(sizes_.size());
@@ -543,7 +543,7 @@ class Array {
     }
     Array<T> permuted(permuted_dims);
     std::vector<int64_t> src_indices(sizes_.size(), -1);
-    permuted.Each([&](absl::Span<const int64_t> indices, int64_t* value) {
+    permuted.Each([&](absl::Span<const int64_t> indices, T* value) {
       CHECK_EQ(sizes_.size(), indices.size());
       for (int64_t i = 0; i < sizes_.size(); ++i) {
         src_indices[permutation[i]] = indices[i];

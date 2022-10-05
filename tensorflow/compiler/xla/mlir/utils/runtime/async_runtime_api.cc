@@ -20,16 +20,16 @@ limitations under the License.
 #include <cstddef>
 #include <iostream>
 #include <ostream>
+#include <string_view>
 #include <thread>  // NOLINT TODO(ezhulenev): Remove this header.
 #include <type_traits>
 
+#include "absl/base/dynamic_annotations.h"
 #include "mlir/ExecutionEngine/AsyncRuntime.h"  // from @llvm-project
 #include "tensorflow/compiler/xla/runtime/async_runtime.h"
 #include "tfrt/host_context/async_value.h"  // from @tf_runtime
 #include "tfrt/host_context/async_value_ref.h"  // from @tf_runtime
 #include "tfrt/host_context/chain.h"  // from @tf_runtime
-#include "tfrt/support/alloc.h"  // from @tf_runtime
-#include "tfrt/support/msan.h"  // from @tf_runtime
 
 namespace xla {
 namespace runtime {
@@ -94,7 +94,7 @@ llvm::orc::SymbolMap AsyncRuntimeApiSymbolMap(
     llvm::orc::MangleAndInterner mangle) {
   llvm::orc::SymbolMap symbol_map;
 
-  auto bind = [&](llvm::StringRef name, auto symbol_ptr) {
+  auto bind = [&](std::string_view name, auto symbol_ptr) {
     symbol_map[mangle(name)] = llvm::JITEvaluatedSymbol(
         llvm::pointerToJITTargetAddress(symbol_ptr), llvm::JITSymbolFlags());
   };
@@ -165,7 +165,7 @@ llvm::orc::SymbolMap AsyncRuntimeMemoryAllocationSymbolMap(
     llvm::orc::MangleAndInterner mangle) {
   llvm::orc::SymbolMap symbol_map;
 
-  auto bind = [&](llvm::StringRef name, auto symbol_ptr) {
+  auto bind = [&](std::string_view name, auto symbol_ptr) {
     symbol_map[mangle(name)] = llvm::JITEvaluatedSymbol(
         llvm::pointerToJITTargetAddress(symbol_ptr), llvm::JITSymbolFlags());
   };
@@ -198,110 +198,98 @@ using xla::runtime::AsyncRuntimeObject;
 // Adds references to reference counted runtime object.
 void mlirAsyncRuntimeAddRef(RefCountedObjPtr ptr, int64_t count) {
   AsyncRuntimeObject *obj = static_cast<AsyncRuntimeObject *>(ptr);
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&ptr, sizeof(RefCountedObjPtr));
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&count, sizeof(int64_t));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&ptr, sizeof(RefCountedObjPtr));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&count, sizeof(int64_t));
   AsyncRuntime::AddRef(obj, count);
 }
 
 // Drops references from reference counted runtime object.
 void mlirAsyncRuntimeDropRef(RefCountedObjPtr ptr, int64_t count) {
   AsyncRuntimeObject *obj = static_cast<AsyncRuntimeObject *>(ptr);
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&ptr, sizeof(RefCountedObjPtr));
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&count, sizeof(int64_t));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&ptr, sizeof(RefCountedObjPtr));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&count, sizeof(int64_t));
   AsyncRuntime::DropRef(obj, count);
 }
 
 // Create a new `async.token` in not-ready state.
 AsyncToken *mlirAsyncRuntimeCreateToken() {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  return runtime.CreateToken();
+  return AsyncRuntime::CreateToken();
 }
 
 // Creates a new `async.value` in not-ready state.
 AsyncValue *mlirAsyncRuntimeCreateValue(int64_t size) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&size, sizeof(int64_t));
-  return runtime.CreateValue(size, /*alignment=*/alignof(std::max_align_t));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&size, sizeof(int64_t));
+  return AsyncRuntime::CreateValue(size,
+                                   /*alignment=*/alignof(std::max_align_t));
 }
 
 // Create a new `async.group` in empty state.
 AsyncGroup *mlirAsyncRuntimeCreateGroup(int64_t size) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&size, sizeof(int64_t));
-  return runtime.CreateGroup(size);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&size, sizeof(int64_t));
+  return AsyncRuntime::CreateGroup(size);
 }
 
 int64_t mlirAsyncRuntimeAddTokenToGroup(AsyncToken *token, AsyncGroup *group) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&group, sizeof(void *));
-  return runtime.AddTokenToGroup(group, token);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&group, sizeof(void *));
+  return AsyncRuntime::AddTokenToGroup(group, token);
 }
 
 bool mlirAsyncRuntimeIsGroupError(AsyncGroup *group) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&group, sizeof(void *));
-  return runtime.IsError(group);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&group, sizeof(void *));
+  return AsyncRuntime::IsError(group);
 }
 
 void mlirAsyncRuntimeEmplaceToken(AsyncToken *token) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
-  runtime.SetAvailable(token);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
+  AsyncRuntime::SetAvailable(token);
 }
 
 void mlirAsyncRuntimeSetTokenError(AsyncToken *token) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
-  runtime.SetError(token);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
+  AsyncRuntime::SetError(token);
 }
 
 bool mlirAsyncRuntimeIsTokenError(AsyncToken *token) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
-  return runtime.IsError(token);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
+  return AsyncRuntime::IsError(token);
 }
 
 void mlirAsyncRuntimeAwaitToken(AsyncToken *token) {
   AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
   runtime.AwaitToken(token);
 }
 
 void mlirAsyncRuntimeAwaitAllInGroup(AsyncGroup *group) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&group, sizeof(void *));
-  runtime.AwaitGroup(group);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&group, sizeof(void *));
+  AsyncRuntime::AwaitGroup(group);
 }
 
 ValueStorage mlirAsyncRuntimeGetValueStorage(AsyncValue *value) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
-  return runtime.GetStorage(value);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
+  return AsyncRuntime::GetStorage(value);
 }
 
 void mlirAsyncRuntimeEmplaceValue(AsyncValue *value) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
-  runtime.SetAvailable(value);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
+  AsyncRuntime::SetAvailable(value);
 }
 
 void mlirAsyncRuntimeSetValueError(AsyncValue *value) {
   AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
   runtime.SetError(value);
 }
 
 bool mlirAsyncRuntimeIsValueError(AsyncValue *value) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
-  return runtime.IsError(value);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
+  return AsyncRuntime::IsError(value);
 }
 
 void mlirAsyncRuntimeAwaitValue(AsyncValue *value) {
-  AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
-  runtime.AwaitValue(value);
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
+  AsyncRuntime::AwaitValue(value);
 }
 
 void mlirAsyncRuntimeExecute(CoroHandle handle, CoroResume resume) {
@@ -314,9 +302,10 @@ void mlirAsyncRuntimeExecute(CoroHandle handle, CoroResume resume) {
 
 void mlirAsyncRuntimeAwaitTokenAndExecute(AsyncToken *token, CoroHandle handle,
                                           CoroResume resume) {
+  // TODO(ezhulenev): Add fast path for available tokens.
   AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
-  runtime.AwaitToken(token, [handle, resume, runtime]() {
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&token, sizeof(void *));
+  AsyncRuntime::AwaitToken(token, [handle, resume, runtime]() {
     AsyncRuntime::Set(runtime);
     (*resume)(handle);
   });
@@ -324,8 +313,9 @@ void mlirAsyncRuntimeAwaitTokenAndExecute(AsyncToken *token, CoroHandle handle,
 
 void mlirAsyncRuntimeAwaitValueAndExecute(AsyncValue *value, CoroHandle handle,
                                           CoroResume resume) {
+  // TODO(ezhulenev): Add fast path for available values.
   AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&value, sizeof(void *));
   runtime.AwaitValue(value, [handle, resume, runtime]() {
     AsyncRuntime::Set(runtime);
 
@@ -336,8 +326,9 @@ void mlirAsyncRuntimeAwaitValueAndExecute(AsyncValue *value, CoroHandle handle,
 void mlirAsyncRuntimeAwaitAllInGroupAndExecute(AsyncGroup *group,
                                                CoroHandle handle,
                                                CoroResume resume) {
+  // TODO(ezhulenev): Add fast path for available groups.
   AsyncRuntime &runtime = AsyncRuntime::GetCurrentRuntime();
-  TFRT_MSAN_MEMORY_IS_INITIALIZED(&group, sizeof(void *));
+  ABSL_ANNOTATE_MEMORY_IS_INITIALIZED(&group, sizeof(void *));
   runtime.AwaitGroup(group, [handle, resume, runtime]() {
     AsyncRuntime::Set(runtime);
     (*resume)(handle);

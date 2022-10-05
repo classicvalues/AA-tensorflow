@@ -15,18 +15,49 @@ limitations under the License.
 
 include "mlir/Pass/PassBase.td"
 
-def FusionPass : Pass<"gml-fusion", "mlir::func::FuncOp"> {
-  let summary = "Fuse producers in into `gml_st.materialize` operations";
-  let constructor = "::mlir::gml_st::createFusionPass()";
-}
-
 def TilingPass : Pass<"gml-tiling", "mlir::func::FuncOp"> {
-  let summary = "Tile operations to produce gml_st.parallel or gml_st.for";
+  let summary = "Tile operations using TilingInterface to produce gml_st.for";
   let constructor = "::mlir::gml_st::createTilingPass()";
   let options = [
+    Option<"opName", "op-name", "std::string", /*default=*/"",
+           "Operation with this name is the anchor to latch on.">,
+    Option<"opLabel", "op-label", "std::string", /*default=*/"",
+           "Operation with this label is the anchor to latch on.">,
+    Option<"distribute", "distribute", "bool", /*default=*/"true",
+           "Generate gml_st.parallel or gml_st.for">,
     ListOption<"tileSizes", "tile-sizes", "int64_t", "Tile sizes",
                "llvm::cl::ZeroOrMore">,
   ];
+}
+
+def FusionPass : Pass<"gml-fusion", "mlir::func::FuncOp"> {
+  let summary = "Fuse producers in into `gml_st.materialize` operations";
+  let constructor = "::mlir::gml_st::createFusionPass()";
+  let options = [
+    Option<"producerLabel", "producer-label", "std::string", /*default=*/"",
+           "Producer label.">,
+    Option<"consumerLabel", "consumer-label", "std::string", /*default=*/"",
+           "Consumer label.">,
+  ];
+}
+
+def TilingCwisePass : Pass<"gml-tiling-cwise", "mlir::func::FuncOp"> {
+  let summary = "Tile and fuse all cwise ops";
+  let constructor = "::mlir::gml_st::createTilingCwisePass()";
+  let options = [
+    Option<"distribute_", "distribute", "bool", /*default=*/"true",
+           "Generate gml_st.parallel or gml_st.for">,
+    ListOption<"tileSizes_", "tile-sizes", "int64_t", 
+               "Right-aligned tile sizes. Do not tile possible remaining "
+               "dimensions", "llvm::cl::ZeroOrMore">,
+  ];
+}
+
+def TilingReductionPass : Pass<"gml-tiling-reduction", "mlir::func::FuncOp"> {
+  let summary = "Tile linalg.generic reductions";
+  let constructor = "::mlir::gml_st::createTilingReductionPass()";
+  let dependentDialects = ["::mlir::gml_st::GmlStDialect",
+                           "::mlir::arith::ArithDialect"];
 }
 
 def ComposeSetOpsPass : Pass<"gml-compose-set-ops", "mlir::func::FuncOp"> {
@@ -34,10 +65,28 @@ def ComposeSetOpsPass : Pass<"gml-compose-set-ops", "mlir::func::FuncOp"> {
   let constructor = "::mlir::gml_st::createComposeSetOpsPass()";
 }
 
+def CollapseMaterializeOpsPass : Pass<"gml-collapse-materialize-ops",
+    "mlir::func::FuncOp"> {
+  let summary = "Collapse (or uncollapse) materialize operations.";
+  let constructor = "::mlir::gml_st::createCollapseMaterializeOpsPass()";
+  let options = [
+    Option<"reverse_", "reverse", "bool", /*default=*/"false", "Whether to "
+        "revert collapsing of materialize operations.">,
+  ];
+}
+
 def GmlStToScf : Pass<"gml-st-to-scf", "mlir::func::FuncOp"> {
   let summary = "Lower `gml_st.loop` to SCF loops and parallel loops";
   let constructor = "::mlir::gml_st::createGmlStToScfPass()";
   let dependentDialects = ["::mlir::scf::SCFDialect"];
+}
+
+def GmlStToGpuPass : Pass<"gml-st-to-gpu", "mlir::func::FuncOp"> {
+  let summary = "Lower nested `gml_st.parallel` to `gpu.launch`";
+  let dependentDialects = ["::mlir::AffineDialect",
+                           "::mlir::arith::ArithDialect",
+                           "::mlir::gpu::GPUDialect", "::mlir::scf::SCFDialect",
+                           "::mlir::vector::VectorDialect"];
 }
 
 def TiledLoopBufferizePass :
@@ -52,5 +101,9 @@ def VectorizeGmlStLoopsPass :
       "Pass to vectorize linalg.generic ops tiled to gml_st.parallel and " #
       "gml_st.for loops.";
   let constructor = "::mlir::gml_st::createVectorizeGmlStLoopsPass()";
+  let options = [
+    Option<"vectorizeGmlStOps", "vectorize-gml-st-ops", "bool", "false",
+           "If true, vectorizes GmlSt ops in addition to linalg ops">,
+  ];
   let dependentDialects = ["::mlir::vector::VectorDialect"];
 }

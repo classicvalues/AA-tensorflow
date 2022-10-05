@@ -29,7 +29,7 @@ limitations under the License.
 #include "llvm/Support/MathExtras.h"
 #include "mlir-hlo/Dialect/gml_st/IR/gml_st_ops.h"
 #include "mlir-hlo/Dialect/gml_st/transforms/fusion_interface.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineExpr.h"
@@ -74,7 +74,7 @@ Value buildPointOp(Location loc, OpBuilder& builder, Value operand,
   SmallVector<int64_t> staticOffsets(operandShape.size(),
                                      ShapedType::kDynamicStrideOrOffset);
   SmallVector<Value> dynamicOffsets;
-  for (int i = 0; i < operandShape.size(); ++i) {
+  for (int64_t i = 0; i < static_cast<int64_t>(operandShape.size()); ++i) {
     if (int outputDim = operandDimsToOutputDims[i]; outputDim >= 0) {
       auto index = builder.create<arith::ConstantIndexOp>(loc, outputDim);
       dynamicOffsets.push_back(builder.create<OffsetOp>(loc, subset, index));
@@ -162,11 +162,11 @@ struct LinalgGenericFusionInterface
              OpBuilder& builder) const {
     auto genericOp = llvm::cast<linalg::GenericOp>(op);
     if (genericOp.getNumOutputs() != 1) return {};
-    Value output = genericOp.outputs().front();
+    Value output = genericOp.getOutputs().front();
     auto outputRank = output.getType().cast<RankedTensorType>().getRank();
 
     auto indexingMaps =
-        to_vector(genericOp.indexing_maps().getAsValueRange<AffineMapAttr>());
+        to_vector(genericOp.getIndexingMaps().getAsValueRange<AffineMapAttr>());
     auto maybeIteratorsToOutputs = mapIteratorsToOutputs(indexingMaps.back());
     if (!maybeIteratorsToOutputs) return {};
     const SmallVector<Optional<int32_t>>& iteratorsToOutputs =
@@ -175,7 +175,7 @@ struct LinalgGenericFusionInterface
     SmallVector<Value> materializedOperands;
     SmallVector<bool> operandsArePoints;
     for (const auto&& [operand, operandMap] :
-         llvm::zip(genericOp.inputs(), indexingMaps)) {
+         llvm::zip(genericOp.getInputs(), indexingMaps)) {
       // Mapping from an operand dimension to an output dimension, or -1 if it
       // doesn't occur in the output.
       SmallVector<int64_t> operandDimsToOutputDims;
@@ -183,7 +183,8 @@ struct LinalgGenericFusionInterface
       // Whether the composition of the inverse of the operand's affine map and
       // the output's affine map is the identity function (i.e., a given output
       // coordinate maps to the same coordinate in the input).
-      bool isIdentity = operandMap.getResults().size() == outputRank;
+      bool isIdentity =
+          static_cast<int64_t>(operandMap.getResults().size()) == outputRank;
       SmallVector<bool> containsDim(outputRank);
       for (const AffineExpr& expression : operandMap.getResults()) {
         auto dim = expression.dyn_cast<AffineDimExpr>();
@@ -191,14 +192,16 @@ struct LinalgGenericFusionInterface
         auto output = iteratorsToOutputs[dim.getPosition()];
         operandDimsToOutputDims.push_back(output.value_or(-1));
         if (output) containsDim[*output] = true;
-        isIdentity &= output.value_or(-1) == operandDimsToOutputDims.size() - 1;
+        isIdentity &= output.value_or(-1) ==
+                      static_cast<int64_t>(operandDimsToOutputDims.size()) - 1;
       }
 
       Value operandSubset;
       if (isIdentity) {
         operandSubset = subset;
         operandsArePoints.push_back(subset.getType().isa<PointType>());
-      } else if (operandDimsToOutputDims.size() == outputRank &&
+      } else if (static_cast<int64_t>(operandDimsToOutputDims.size()) ==
+                     outputRank &&
                  !llvm::is_contained(containsDim, false)) {
         operandSubset = builder.create<TransposeDimsOp>(
             loc, subset,
@@ -255,7 +258,7 @@ struct LinalgGenericFusionInterface
           loc, subResultTy, materializedOperands.back());
     }
 
-    linalg::LinalgOp linalgOp = genericOp;
+    linalg::DestinationStyleOpInterface linalgOp = genericOp;
     auto outputOp = cast<linalg::GenericOp>(
         *linalgOp.clone(builder, loc, subResultTy, materializedOperands));
 

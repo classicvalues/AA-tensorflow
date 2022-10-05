@@ -23,9 +23,9 @@ limitations under the License.
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
-#include "mlir-hlo/Transforms/PassDetail.h"
 #include "mlir-hlo/Transforms/passes.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -37,13 +37,16 @@ limitations under the License.
 
 namespace mlir {
 
+#define GEN_PASS_DEF_TILELOOPSPASS
+#include "mlir-hlo/Transforms/passes.h.inc"
+
 using ::mlir::scf::ParallelOp;
 
 namespace {
 
 // This is the implementation of the TileLoops pass declared in
 //  include/mlir-hlo/Transforms/passes.td
-class TileLoopsPass : public TileLoopsPassBase<TileLoopsPass> {
+class TileLoopsPass : public impl::TileLoopsPassBase<TileLoopsPass> {
  public:
   // Creates a TileLoopsPass with tiles sizes provided through `tile_sizes`
   // and unroll factors provided through `unroll_factors`.
@@ -121,7 +124,7 @@ void TileLoopsPass::runOnOperation() {
   // number of iterations.
   RewritePatternSet patterns(&getContext());
   getContext()
-      .getOrLoadDialect<arith::ArithmeticDialect>()
+      .getOrLoadDialect<arith::ArithDialect>()
       ->getCanonicalizationPatterns(patterns);
   if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
     return signalPassFailure();

@@ -194,7 +194,7 @@ PYBIND11_MODULE(tpu_client_extension, m) {
            })
       .def("copy_to_host_async", &PyTpuBuffer::CopyToHostAsync,
            py::call_guard<py::gil_scoped_release>())
-      .def("to_py",
+      .def("__array__",
            [](PyTpuBuffer* buffer) -> StatusOr<py::object> {
              GlobalPyRefManager()->CollectGarbage();
              std::shared_ptr<Literal> literal;
@@ -226,6 +226,9 @@ PYBIND11_MODULE(tpu_client_extension, m) {
 
   py::class_<PyTpuToken> token(m, "Token");
   token.def("block_until_ready", &PyTpuToken::Await);
+  py::class_<PyShardedTpuToken> sharded_token(m, "ShardedToken");
+  sharded_token.def("block_until_ready", &PyShardedTpuToken::Await);
+  sharded_token.def("get_token", &PyShardedTpuToken::GetPyToken);
 
   py::class_<PyTpuExecutable>(m, "TpuExecutable")
       .def("local_logical_device_ids",

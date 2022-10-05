@@ -17,7 +17,9 @@ limitations under the License.
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/notification.h"
@@ -44,7 +46,6 @@ namespace {
 using ::testing::EqualsProto;
 using ::testing::IsEmpty;
 using ::testing::UnorderedElementsAre;
-using ::testing::proto::IgnoringRepeatedFieldOrdering;
 
 constexpr absl::Duration kHeartbeatTimeout = absl::Seconds(2);
 constexpr absl::Duration kShutdownBarrierTimeout = absl::Milliseconds(500);
@@ -92,6 +93,7 @@ class TestCoordinationClient : public CoordinationClient {
   UNIMPLEMENTED(WaitForAllTasks);
   UNIMPLEMENTED(ResetTask);
   UNIMPLEMENTED(ReportErrorToService);
+  UNIMPLEMENTED(GetTaskState);
   UNIMPLEMENTED(InsertKeyValue);
   UNIMPLEMENTED(TryGetKeyValue);
   UNIMPLEMENTED(GetKeyValueDir);
@@ -474,7 +476,7 @@ TEST_F(CoordinateTwoTasksTest, TestSetGetValues) {
       });
   n1.WaitForNotification();
   TF_ASSERT_OK(ret.status());
-  EXPECT_EQ(ret.ValueOrDie(), "value0");
+  EXPECT_EQ(ret.value(), "value0");
   // Get key with redundant slashes
   absl::Notification n2;
   coord_service_->GetKeyValueAsync(
@@ -483,7 +485,7 @@ TEST_F(CoordinateTwoTasksTest, TestSetGetValues) {
         n2.Notify();
       });
   n2.WaitForNotification();
-  EXPECT_EQ(ret.ValueOrDie(), "value1");
+  EXPECT_EQ(ret.value(), "value1");
 
   // Delete single key-value
   TF_ASSERT_OK(coord_service_->DeleteKeyValue("key0"));
@@ -498,7 +500,7 @@ TEST_F(CoordinateTwoTasksTest, TestSetGetValues) {
   // Insert the previously deleted key again
   TF_ASSERT_OK(coord_service_->InsertKeyValue("key0", "value0_new"));
   n3.WaitForNotification();
-  EXPECT_EQ(ret.ValueOrDie(), "value0_new");
+  EXPECT_EQ(ret.value(), "value0_new");
 
   // Delete key-values recursively
   TF_ASSERT_OK(coord_service_->DeleteKeyValue("/path"));
@@ -529,7 +531,7 @@ TEST(CoordinationServiceTest, TryGetKeyValue) {
   // Insert key value.
   TF_ASSERT_OK(coord_service->InsertKeyValue("test_key", "test_value"));
   result = coord_service->TryGetKeyValue("test_key");
-  EXPECT_EQ(result.ValueOrDie(), "test_value");
+  EXPECT_EQ(result.value(), "test_value");
 
   // Delete Key, and try to get the key again.
   TF_ASSERT_OK(coord_service->DeleteKeyValue("test_key"));
@@ -671,8 +673,7 @@ TEST(CoordinationServiceTest, ListClusterDevices_TfDevice) {
                         local_devices_1.mutable_tf()->devices().end());
   expected_devices->Add(local_devices_2.mutable_tf()->devices().begin(),
                         local_devices_2.mutable_tf()->devices().end());
-  EXPECT_THAT(cluster_devices, IgnoringRepeatedFieldOrdering(
-                                   EqualsProto(expected_cluster_devices)));
+  EXPECT_THAT(cluster_devices, EqualsProto(expected_cluster_devices));
 }
 
 TEST(CoordinationServiceTest, ListClusterDevices_XlaDevice) {
@@ -713,9 +714,11 @@ TEST(CoordinationServiceTest, ListClusterDevices_XlaDevice) {
 
   // Each task sends its device info.
   CoordinationServiceDeviceInfo cluster_devices;
-  coord_service->WaitForAllTasks(task_0, local_devices_0,
-                                 [&](Status s) { TF_ASSERT_OK(s); });
+  // Make sure that cluster device order is deterministic even if devices are
+  // sent out of order.
   coord_service->WaitForAllTasks(task_1, local_devices_1,
+                                 [&](Status s) { TF_ASSERT_OK(s); });
+  coord_service->WaitForAllTasks(task_0, local_devices_0,
                                  [&](Status s) { TF_ASSERT_OK(s); });
   coord_service->WaitForAllTasks(task_2, local_devices_2, [&](Status s) {
     TF_ASSERT_OK(s);
@@ -736,8 +739,7 @@ TEST(CoordinationServiceTest, ListClusterDevices_XlaDevice) {
       local_1;
   *expected_cluster_devices.mutable_xla()->mutable_devices()->add_nodes() =
       local_2;
-  EXPECT_THAT(cluster_devices, IgnoringRepeatedFieldOrdering(
-                                   EqualsProto(expected_cluster_devices)));
+  EXPECT_THAT(cluster_devices, EqualsProto(expected_cluster_devices));
 }
 
 // Task devices should not be added twice if same task calls WaitForAllDevices()
@@ -792,8 +794,7 @@ TEST(CoordinationServiceTest, ListClusterDevices_DevicesAreNotAddedTwice) {
                         local_devices_0.mutable_tf()->devices().end());
   expected_devices->Add(local_devices_1.mutable_tf()->devices().begin(),
                         local_devices_1.mutable_tf()->devices().end());
-  EXPECT_THAT(cluster_devices, IgnoringRepeatedFieldOrdering(
-                                   EqualsProto(expected_cluster_devices)));
+  EXPECT_THAT(cluster_devices, EqualsProto(expected_cluster_devices));
 }
 
 TEST_F(CoordinationBarrierTest, Barrier) {

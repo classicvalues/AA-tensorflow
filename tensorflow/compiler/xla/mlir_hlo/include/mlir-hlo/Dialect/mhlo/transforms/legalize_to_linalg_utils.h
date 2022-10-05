@@ -28,6 +28,7 @@ limitations under the License.
 #include "llvm/ADT/StringSet.h"
 #include "mlir-hlo/Dialect/mhlo/transforms/map_mhlo_to_scalar_op.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/Attributes.h"
@@ -55,14 +56,18 @@ SmallVector<StringRef, 3> getParallelAndReductionIterators(unsigned nLoops,
 /// Returns an ArrayAttr that contains `nParallelLoops` "parallel" attributes.
 SmallVector<StringRef, 3> getNParallelLoopsAttrs(unsigned nParallelLoops);
 
-/// Generates an initTensor op in the linalg dialect.
-Value getInitTensor(OpBuilder& b, Location loc, ShapedType type,
-                    ArrayRef<Value> dynSizes);
+/// Generates an init sparse tensor.
+Value getEmptySparseTensor(OpBuilder& b, Location loc, ShapedType type,
+                           ArrayRef<Value> dynSizes);
 
-/// Generates an tensor initialization for the result of the operation, which
-/// would be a dense tensor or a sparse tensor.
-Value getInitTensorFor(OpBuilder& b, Location loc, ShapedType resultType,
-                       Operation* op, ValueRange operands);
+/// Generates a tensor.empty op.
+Value getEmptyTensor(OpBuilder& b, Location loc, ShapedType type,
+                     ArrayRef<Value> dynSizes);
+
+/// Generates an empty tensor for the result of the operation, which could be a
+/// dense tensor or a sparse tensor.
+Value getEmptyTensorFor(OpBuilder& b, Location loc, ShapedType resultType,
+                        Operation* op, ValueRange operands);
 
 /// Sparsifies a (block of) operation(s) that cannot be handled directly
 /// by the sparse compiler but has well-known semi-ring semantics.
@@ -82,19 +87,6 @@ Value preSparsify(Operation* op, llvm::SmallVector<Value, 2>& values, Type rtp,
 
 /// Finalizes sparse semi-ring construction.
 Value postSparsify(Operation* op, Value semiring, Value result, OpBuilder* b);
-
-template <typename OpTy>
-SmallVector<NamedAttribute> pruneAttributeList(OpTy op) {
-  auto opAttributes = op.getAttributeNames();
-  llvm::StringSet<> elidedAttrs;
-  elidedAttrs.insert(opAttributes.begin(), opAttributes.end());
-  SmallVector<NamedAttribute> preservedAttrs;
-  for (auto attr : op->getAttrs()) {
-    if (elidedAttrs.count(attr.getName())) continue;
-    preservedAttrs.push_back(attr);
-  }
-  return preservedAttrs;
-}
 
 /// Converts a HLO operation to a linalg.generic op that contains the
 /// corresponding scalar operations.
@@ -140,8 +132,10 @@ class PointwiseToLinalgConverter : public OpConversionPattern<OpTy> {
     }
 
     auto loc = op.getLoc();
-    // TODO(jreiffers): Enable this optimization outside of linalg ops. This
-    // currently breaks KernelGen.
+    // Within a linalg op, we can immediately de-tensorsize if the computation
+    // is scalar. We do not do this on the top-level, as that would break the
+    // nice invariant that all programs are exclusively on tensors, which is
+    // currently relied on for fusion in some pipelines.
     if (nloops == 0 && isInBodyOfLinalgOps(op)) {
       // No need to create a linalg.generic if all inputs are scalars.
       SmallVector<Value> inputs;
@@ -160,7 +154,7 @@ class PointwiseToLinalgConverter : public OpConversionPattern<OpTy> {
     // Find input/output values and types.
     ValueRange inputs = adaptor.getOperands();
     Value output =
-        getInitTensorFor(rewriter, loc, *resultTy, op, adaptor.getOperands());
+        getEmptyTensorFor(rewriter, loc, *resultTy, op, adaptor.getOperands());
 
     // Create indexing maps.
     AffineMap scalarMap = AffineMap::get(nloops, 0, rewriter.getContext());
@@ -188,7 +182,7 @@ class PointwiseToLinalgConverter : public OpConversionPattern<OpTy> {
             nestedBuilder.create<linalg::YieldOp>(loc, innerResult);
           }
         },
-        pruneAttributeList(op));
+        linalg::getPrunedAttributeList(op));
     if (failed) return failure();
 
     rewriter.replaceOp(op, linalgOp->getResults());

@@ -36,9 +36,9 @@ limitations under the License.
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/core/platform/errors.h"
-#include "tensorflow/core/platform/logging.h"
-#include "tensorflow/core/platform/statusor.h"
+#include "tensorflow/tsl/platform/errors.h"
+#include "tensorflow/tsl/platform/logging.h"
+#include "tensorflow/tsl/platform/statusor.h"
 
 namespace xla {
 
@@ -156,8 +156,7 @@ bool FusedIrEmitter::IsFusedIrEmitterInefficient(
   // If 'producer' is a fusion node as well, also evaluate it. Pass the
   // evaluated duplication of the fusion node if it is merged into consumer.
   FusionNodeIndexingEvaluation eval_producer(
-      &producer, eval_consumer.EvaluateEmittedInstructions(&producer),
-      eval_consumer.fusion_instructions());
+      &producer, eval_consumer.EvaluateEmittedInstructions(&producer));
   return eval_producer.MaxCodeDuplicationTooHigh();
 }
 

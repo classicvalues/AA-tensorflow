@@ -20,6 +20,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/stream_executor_pimpl.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <utility>
 
@@ -39,7 +40,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/stream_executor/rng.h"
 #include "tensorflow/compiler/xla/stream_executor/stream.h"
 #include "tensorflow/compiler/xla/stream_executor/stream_executor_internal.h"
-#include "tensorflow/core/util/env_var.h"
+#include "tensorflow/tsl/util/env_var.h"
 
 namespace {
 bool FLAGS_check_device_leaks = false;
@@ -131,8 +132,8 @@ MakeScopedTracer(StreamExecutor* stream_exec, BeginCallT begin_call,
 // TF_PER_DEVICE_MEMORY_LIMIT_MB environment variable is not set.
 static int64_t GetMemoryLimitBytes() {
   int64_t value;
-  SE_CHECK_OK(tensorflow::ReadInt64FromEnvVar("TF_PER_DEVICE_MEMORY_LIMIT_MB",
-                                              0, &value));
+  SE_CHECK_OK(
+      tsl::ReadInt64FromEnvVar("TF_PER_DEVICE_MEMORY_LIMIT_MB", 0, &value));
   return value * (1ll << 20);
 }
 
@@ -315,7 +316,8 @@ port::Status StreamExecutor::GetFusedConvolveRunners(
     bool use_cudnn_frontend, dnn::ConvolutionKind kind,
     dnn::DataType input_type, dnn::DataType bias_type,
     dnn::DataType output_type, double conv_input_scale, double side_input_scale,
-    Stream* stream, const dnn::BatchDescriptor& input_descriptor,
+    double leakyrelu_alpha, Stream* stream,
+    const dnn::BatchDescriptor& input_descriptor,
     const dnn::FilterDescriptor& filter_descriptor,
     const dnn::BatchDescriptor& bias_descriptor,
     const dnn::BatchDescriptor& output_descriptor,
@@ -328,9 +330,27 @@ port::Status StreamExecutor::GetFusedConvolveRunners(
   }
   return dnn_support->GetFusedConvolveRunners(
       use_cudnn_frontend, kind, input_type, bias_type, output_type,
-      conv_input_scale, side_input_scale, stream, input_descriptor,
-      filter_descriptor, bias_descriptor, output_descriptor,
+      conv_input_scale, side_input_scale, leakyrelu_alpha, stream,
+      input_descriptor, filter_descriptor, bias_descriptor, output_descriptor,
       convolution_descriptor, use_fallback, activation_mode, out_exec_plans);
+}
+
+port::Status StreamExecutor::GetFusedMatmulRunners(
+    bool use_cudnn_frontend, dnn::DataType input_type, dnn::DataType bias_type,
+    dnn::DataType output_type, Stream* stream, bool trans_a, bool trans_b,
+    uint64_t m, uint64_t n, uint64_t k, int64_t lda, int64_t ldb, int64_t ldc,
+    dnn::ActivationMode activation_mode, bool use_fallback,
+    std::vector<std::unique_ptr<const dnn::FusedMatmulRunner>>*
+        out_exec_plans) {
+  dnn::DnnSupport* dnn_support = AsDnn();
+  if (!dnn_support) {
+    return port::UnimplementedError("DNN library is not found.");
+  }
+
+  return dnn_support->GetFusedMatmulRunners(
+      use_cudnn_frontend, input_type, bias_type, output_type, stream, trans_a,
+      trans_b, m, n, k, lda, ldb, ldc, activation_mode, use_fallback,
+      out_exec_plans);
 }
 
 bool StreamExecutor::GetMIOpenConvolveAlgorithms(
@@ -725,7 +745,7 @@ port::Status StreamExecutor::MemZero(Stream* stream, DeviceMemoryBase* location,
 
 port::Status StreamExecutor::Memset32(Stream* stream,
                                       DeviceMemoryBase* location,
-                                      uint32 pattern, uint64_t size) {
+                                      uint32_t pattern, uint64_t size) {
   CHECK_EQ(0, size % 4)
       << "need 32-bit multiple size to fill with 32-bit pattern";
   return implementation_->Memset32(stream, location, pattern, size);
@@ -912,17 +932,16 @@ port::StatusOr<OwningDeviceMemory> StreamExecutorMemoryAllocator::Allocate(
     int64_t memory_space) {
   TF_ASSIGN_OR_RETURN(StreamExecutor * executor,
                       GetStreamExecutor(device_ordinal));
-  DeviceMemoryBase result = executor->AllocateArray<uint8>(size, memory_space);
+  DeviceMemoryBase result =
+      executor->AllocateArray<uint8_t>(size, memory_space);
   if (size > 0 && result == nullptr) {
-    return tensorflow::errors::ResourceExhausted(absl::StrFormat(
+    return tsl::errors::ResourceExhausted(absl::StrFormat(
         "Failed to allocate request for %s (%uB) on device ordinal %d",
-        tensorflow::strings::HumanReadableNumBytes(size), size,
-        device_ordinal));
+        tsl::strings::HumanReadableNumBytes(size), size, device_ordinal));
   }
-  VLOG(3) << absl::StreamFormat(
-      "Allocated %s (%uB) on device ordinal %d: %p",
-      tensorflow::strings::HumanReadableNumBytes(size), size, device_ordinal,
-      result.opaque());
+  VLOG(3) << absl::StreamFormat("Allocated %s (%uB) on device ordinal %d: %p",
+                                tsl::strings::HumanReadableNumBytes(size), size,
+                                device_ordinal, result.opaque());
   return OwningDeviceMemory(result, device_ordinal, this);
 }
 
@@ -935,13 +954,13 @@ port::Status StreamExecutorMemoryAllocator::Deallocate(int device_ordinal,
                                   mem.opaque(), device_ordinal);
     executor->Deallocate(&mem);
   }
-  return ::tensorflow::OkStatus();
+  return ::tsl::OkStatus();
 }
 
 port::StatusOr<StreamExecutor*>
 StreamExecutorMemoryAllocator::GetStreamExecutor(int device_ordinal) const {
   if (device_ordinal < 0) {
-    return tensorflow::errors::InvalidArgument(absl::StrFormat(
+    return tsl::errors::InvalidArgument(absl::StrFormat(
         "device ordinal value (%d) must be non-negative", device_ordinal));
   }
   for (StreamExecutor* se : stream_executors_) {
@@ -949,7 +968,7 @@ StreamExecutorMemoryAllocator::GetStreamExecutor(int device_ordinal) const {
       return se;
     }
   }
-  return tensorflow::errors::NotFound(
+  return tsl::errors::NotFound(
       absl::StrFormat("Device %s:%d present but not supported",
                       platform()->Name(), device_ordinal));
 }

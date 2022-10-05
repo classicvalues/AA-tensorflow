@@ -22,8 +22,8 @@ limitations under the License.
 // In your BUILD rule, add a dependency on a platform plugin that you'd like
 // to use, such as:
 //
-//   //third_party/tensorflow/stream_executor/cuda:cuda_platform
-//   //third_party/tensorflow/stream_executor/opencl:opencl_platform
+//   //third_party/tensorflow/compiler/xla/stream_executor/cuda:cuda_platform
+//   //third_party/tensorflow/compiler/xla/stream_executor/opencl:opencl_platform
 //
 // This will register platform plugins that can be discovered via this
 // interface. Sample API usage:
@@ -31,7 +31,7 @@ limitations under the License.
 //   port::StatusOr<Platform*> platform_status =
 //      se::MultiPlatformManager::PlatformWithName("OpenCL");
 //   if (!platform_status.ok()) { ... }
-//   Platform* platform = platform_status.ValueOrDie();
+//   Platform* platform = platform_status.value();
 //   LOG(INFO) << platform->VisibleDeviceCount() << " devices visible";
 //   if (platform->VisibleDeviceCount() <= 0) { return; }
 //
@@ -43,7 +43,7 @@ limitations under the License.
 //                 << ": " << executor_status.status();
 //       continue;
 //     }
-//     LOG(INFO) << "found usable executor: " << executor_status.ValueOrDie();
+//     LOG(INFO) << "found usable executor: " << executor_status.value();
 //   }
 //
 // A few things to note:
@@ -56,10 +56,10 @@ limitations under the License.
 // And similarly, for standard interfaces (BLAS, RNG, etc.) you can add
 // dependencies on support libraries, e.g.:
 //
-//    //third_party/tensorflow/stream_executor/cuda:pluton_blas_plugin
-//    //third_party/tensorflow/stream_executor/cuda:cudnn_plugin
-//    //third_party/tensorflow/stream_executor/cuda:cublas_plugin
-//    //third_party/tensorflow/stream_executor/cuda:curand_plugin
+//    //third_party/tensorflow/compiler/xla/stream_executor/cuda:pluton_blas_plugin
+//    //third_party/tensorflow/compiler/xla/stream_executor/cuda:cudnn_plugin
+//    //third_party/tensorflow/compiler/xla/stream_executor/cuda:cublas_plugin
+//    //third_party/tensorflow/compiler/xla/stream_executor/cuda:curand_plugin
 
 #ifndef TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_MULTI_PLATFORM_MANAGER_H_
 #define TENSORFLOW_COMPILER_XLA_STREAM_EXECUTOR_MULTI_PLATFORM_MANAGER_H_

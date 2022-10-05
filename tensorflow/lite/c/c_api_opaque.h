@@ -79,11 +79,31 @@ TFL_CAPI_EXPORT extern TfLiteOpaqueTensor* TfLiteOpaqueNodeGetOutput(
     TfLiteOpaqueContext* opaque_context, const TfLiteOpaqueNode* opaque_node,
     int index);
 
+// Gets the number of input tensors of the provided 'opaque_node'.
+TFL_CAPI_EXPORT int TfLiteOpaqueNodeNumberOfInputs(
+    const TfLiteOpaqueNode* opaque_node);
+
+// Gets the number of output tensors of the provided 'opaque_node'.
+TFL_CAPI_EXPORT int TfLiteOpaqueNodeNumberOfOutputs(
+    const TfLiteOpaqueNode* opaque_node);
+
 // Returns opaque data provided by the node implementer. The value returned
 // from this function is the value that was returned from the `init` callback
 // that was passed to `TfLiteRegistrationExternalSetInit`.
 TFL_CAPI_EXPORT extern void* TfLiteOpaqueNodeGetUserData(
     const TfLiteOpaqueNode* opaque_node);
+
+// --------------------------------------------------------------------------
+// Accessors for TfLiteOpaqueContext.
+
+typedef struct TfLiteIntArray TfLiteIntArray;
+
+// Loads the provided `execution_plan` associated with the provided
+// `opaque_context`.  Returns `kTfLiteOk` if the `execution_plan` was
+// successfully loaded.  A return value different from `kTfLiteOk` indicates a
+// failure and the `execution_plan` will be left in an unspecified state.
+TFL_CAPI_EXPORT extern TfLiteStatus TfLiteOpaqueContextGetExecutionPlan(
+    TfLiteOpaqueContext* opaque_context, TfLiteIntArray** execution_plan);
 
 #ifdef __cplusplus
 }  // extern "C"

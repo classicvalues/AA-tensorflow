@@ -16,17 +16,14 @@
 
 #include "tensorflow/compiler/xla/runtime/arguments.h"
 
+#include <array>
 #include <type_traits>
 #include <utility>
 
-#include "tensorflow/core/platform/test_benchmark.h"
-#include "tfrt/dtype/dtype.h"  // from @tf_runtime
+#include "tensorflow/tsl/platform/test_benchmark.h"
 
 namespace xla {
 namespace runtime {
-
-using llvm::ArrayRef;
-using tfrt::DType;
 
 //===----------------------------------------------------------------------===//
 // Benchmarks for constructing MemrefDesc.
@@ -43,9 +40,9 @@ static void BM_CreateMemrefDesc_1d(benchmark::State& state) {
     Arguments<MemrefDesc> memrefs(num_memrefs);
 
     for (unsigned i = 0; i < num_memrefs; ++i) {
-      ArrayRef<int64_t> sizes = size;
-      ArrayRef<int64_t> strides = stride;
-      memrefs.emplace_back(tfrt::DType::I8, ptr, 0, sizes, strides);
+      std::array<int64_t, 1> sizes = {size};
+      std::array<int64_t, 1> strides = {stride};
+      memrefs.emplace_back(PrimitiveType::S8, ptr, 0, sizes, strides);
     }
 
     benchmark::DoNotOptimize(memrefs);
@@ -58,8 +55,9 @@ BENCHMARK(BM_CreateMemrefDesc_1d)->Arg(1)->Arg(4)->Arg(8)->Arg(12)->Arg(16);
 // Run benchmarks for verifying operands.
 //===----------------------------------------------------------------------===//
 
-static MemrefDesc GetFakeMemref(ArrayRef<int64_t> sizes) {
-  return MemrefDesc(DType::F32, nullptr, 0, sizes, sizes /* fake strides*/);
+static MemrefDesc GetFakeMemref(absl::Span<const int64_t> sizes) {
+  return MemrefDesc(PrimitiveType::F32, nullptr, 0, sizes,
+                    sizes /* fake strides*/);
 }
 
 static void BenchmarkVerifyMemrefOperand(benchmark::State& state,
@@ -67,7 +65,7 @@ static void BenchmarkVerifyMemrefOperand(benchmark::State& state,
   MemrefType type(memref.sizes(), memref.dtype());
 
   for (auto _ : state) {
-    if (auto err = VerifyMemrefArgument(0, type, memref)) break;
+    if (auto st = VerifyMemrefArgument(0, type, memref); !st.ok()) break;
   }
 }
 

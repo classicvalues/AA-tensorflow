@@ -13,16 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#ifndef XLA_RUNTIME_ARGUMENTS_H_
-#define XLA_RUNTIME_ARGUMENTS_H_
+#ifndef TENSORFLOW_COMPILER_XLA_RUNTIME_ARGUMENTS_H_
+#define TENSORFLOW_COMPILER_XLA_RUNTIME_ARGUMENTS_H_
 
 #include <cstddef>
+#include <initializer_list>
+#include <string>
 #include <type_traits>
 
+#include "absl/status/status.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Error.h"
+#include "tensorflow/compiler/xla/primitive_util.h"
 #include "tensorflow/compiler/xla/runtime/types.h"
-#include "tfrt/dtype/dtype.h"  // from @tf_runtime
 
 namespace xla {
 namespace runtime {
@@ -38,24 +40,21 @@ class Argument : public llvm::RTTIExtends<Type, llvm::RTTIRoot> {
   Argument() = default;
 
   // Verifies that the argument matches the expected type.
-  virtual llvm::Error Verify(const Type& type) const = 0;
+  virtual absl::Status Verify(const Type& type) const = 0;
 
-  // Packs argument into the `args` array starting at the given `offset`
-  // according to the expected executable ABI. Return offset incremented by
-  // the number of packed pointers, so that result will point to the offset for
-  // packing the next argument.
+  // Packs argument into the `args` view according to the expected executable
+  // ABI.
   //
-  // Arguments array is guaranteed to be properly sized to have space for all
+  // Arguments view is guaranteed to be properly sized to have space for all
   // arguments according to the arguments memory layout.
-  virtual size_t Pack(llvm::MutableArrayRef<void*> args,
-                      size_t offset) const = 0;
+  virtual void Pack(absl::Span<void*> args) const = 0;
 
-  virtual llvm::raw_ostream& print(llvm::raw_ostream& os) const = 0;
+  virtual std::string ToString() const = 0;
 };
 
 inline llvm::raw_ostream& operator<<(llvm::raw_ostream& os,
                                      const Argument& arg) {
-  return arg.print(os);
+  return os << arg.ToString();
 }
 
 //===----------------------------------------------------------------------===//
@@ -141,7 +140,7 @@ class Arguments {
 };
 
 // A constant reference to an array of arguments, somewhat similar to the
-// `ArrayRef<Argument>`, however because `ArrayRef` of a virtual base is not
+// `absl::Span<const Argument>`, however because `Span` of a virtual base is not
 // possible, we have our own type that is constructible from the `Arguments`
 // and array reference or vector of any argument subtype.
 class ArgumentsRef {
@@ -149,7 +148,9 @@ class ArgumentsRef {
   static constexpr bool is_argument = std::is_base_of_v<Argument, T>;
 
  public:
-  template <typename... Ts>
+  ArgumentsRef() : data_(nullptr), size_(0), stride_(0) {}
+
+  template <typename... Ts, std::enable_if_t<sizeof...(Ts) != 0>* = nullptr>
   ArgumentsRef(const Arguments<Ts...>& args)  // NOLINT
       : data_(reinterpret_cast<const Argument*>(args.storage_.data())),
         size_(args.size()),
@@ -171,6 +172,10 @@ class ArgumentsRef {
   ArgumentsRef(const std::array<T, n>& arr)  // NOLINT
       : ArgumentsRef(llvm::ArrayRef<T>(arr)) {}
 
+  template <typename T, std::enable_if_t<is_argument<T>>* = nullptr>
+  ArgumentsRef(std::initializer_list<T> list)  // NOLINT
+      : ArgumentsRef(llvm::ArrayRef<T>(list)) {}
+
   const Argument& operator[](size_t index) const {
     assert(index < size_ && "index out of bounds");
     auto* ptr = reinterpret_cast<const std::byte*>(data_) + index * stride_;
@@ -188,16 +193,16 @@ class ArgumentsRef {
 };
 
 //===----------------------------------------------------------------------===//
-// Canonical types for passing compiled kernel arguments.
+// Canonical types for passing compiled executable arguments.
 //===----------------------------------------------------------------------===//
 
 // By default we provide a set of types for passing common arguments to the
-// compiled kernel. The type hierarchy is open, and users can extend it by
+// compiled executable. The type hierarchy is open, and users can extend it by
 // definining new `Type` and `Argument` with the corresponding MLIR types and
 // MLIR passes to lower types and operations to the LLVM dialect.
 
 //===----------------------------------------------------------------------===//
-// OpaqueArg for passing `!llvm.ptr` (opaque pointer) arguments.
+// OpaqueArg for passing `!rt.opaque` arguments (lowered to `!llvm.ptr`).
 //===----------------------------------------------------------------------===//
 
 class OpaqueArg final : public llvm::RTTIExtends<OpaqueArg, Argument> {
@@ -208,12 +213,48 @@ class OpaqueArg final : public llvm::RTTIExtends<OpaqueArg, Argument> {
 
   void* ptr() const { return ptr_; }
 
-  llvm::Error Verify(const Type& type) const final;
-  size_t Pack(llvm::MutableArrayRef<void*> args, size_t offset) const final;
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  absl::Status Verify(const Type& type) const final;
+  void Pack(absl::Span<void*> args) const final;
+  std::string ToString() const final;
 
  private:
   void* ptr_;
+};
+
+//===----------------------------------------------------------------------===//
+// ScalarArg for passing integer or float scalar arguments.
+//===----------------------------------------------------------------------===//
+
+class ScalarArg final : public llvm::RTTIExtends<ScalarArg, Argument> {
+  template <typename T, typename... Ts>
+  static inline constexpr bool kIsOneOf = (std::is_same_v<T, Ts> || ...);
+
+ public:
+  static constexpr char ID = 0;  // NOLINT
+
+  template <typename T,
+            std::enable_if_t<kIsOneOf<T, float, int32_t, int64_t>>* = nullptr>
+  explicit ScalarArg(T value)
+      : type_(primitive_util::NativeToPrimitiveType<T>()), value_(value) {}
+
+  absl::Status Verify(const Type& type) const final;
+  void Pack(absl::Span<void*> args) const final;
+  std::string ToString() const final;
+
+ private:
+  // We store value in a union instead of an `std::variant` so that we can pack
+  // a pointer to this union as an executable argument.
+  union Value {
+    explicit Value(int32_t i32) : i32(i32) {}
+    explicit Value(int64_t i64) : i64(i64) {}
+    explicit Value(float f32) : f32(f32) {}
+    int32_t i32;
+    int64_t i64;
+    float f32;
+  };
+
+  PrimitiveType type_;
+  Value value_;
 };
 
 //===----------------------------------------------------------------------===//
@@ -224,8 +265,8 @@ class MemrefDesc final : public llvm::RTTIExtends<MemrefDesc, Argument> {
  public:
   static constexpr char ID = 0;  // NOLINT
 
-  MemrefDesc(tfrt::DType dtype, void* data, int64_t offset,
-             llvm::ArrayRef<int64_t> sizes, llvm::ArrayRef<int64_t> strides)
+  MemrefDesc(PrimitiveType dtype, void* data, int64_t offset,
+             absl::Span<const int64_t> sizes, absl::Span<const int64_t> strides)
       : rank_(sizes.size()), dtype_(dtype), data_(data), offset_(offset) {
     assert(sizes.size() == strides.size() && "invalid sizes and strides pair");
     sizes_and_strides_.reserve(2 * rank_);
@@ -238,14 +279,14 @@ class MemrefDesc final : public llvm::RTTIExtends<MemrefDesc, Argument> {
   //
   // Expected `InitializeSizesAndStrides` callback signature:
   //
-  //   void operator()(MutableArrayRef<int64_t> sizes,
-  //                   MutableArrayRef<int64_t> strides);
+  //   void operator()(absl::Span<int64_t> sizes,
+  //                   absl::Span<int64_t> strides);
   //
   // We pass the init callback as a template argument to be able to
   // inline it at the call site, because MemrefDesc construction is on a hot
   // path.
   template <typename InitializeSizesAndStrides>
-  MemrefDesc(unsigned rank, tfrt::DType dtype, void* data, int64_t offset,
+  MemrefDesc(unsigned rank, PrimitiveType dtype, void* data, int64_t offset,
              InitializeSizesAndStrides initialize);
 
   // Ensure that MemrefDesc is always moved around instead of copying.
@@ -255,7 +296,7 @@ class MemrefDesc final : public llvm::RTTIExtends<MemrefDesc, Argument> {
   MemrefDesc& operator=(MemrefDesc&&) = default;
 
   unsigned rank() const { return rank_; }
-  tfrt::DType dtype() const { return dtype_; }
+  PrimitiveType dtype() const { return dtype_; }
 
   void* data() const { return data_; }
   int64_t offset() const { return offset_; }
@@ -265,20 +306,21 @@ class MemrefDesc final : public llvm::RTTIExtends<MemrefDesc, Argument> {
     return sizes_and_strides_[rank_ + index];
   }
 
-  llvm::ArrayRef<int64_t> sizes() const {
+  absl::Span<const int64_t> sizes() const {
     return {sizes_and_strides_.data(), rank_};
   }
-  llvm::ArrayRef<int64_t> strides() const {
+
+  absl::Span<const int64_t> strides() const {
     return {sizes_and_strides_.data() + rank_, rank_};
   }
 
-  llvm::Error Verify(const Type& type) const final;
-  size_t Pack(llvm::MutableArrayRef<void*> args, size_t offset) const final;
-  llvm::raw_ostream& print(llvm::raw_ostream& os) const final;
+  absl::Status Verify(const Type& type) const final;
+  void Pack(absl::Span<void*> args) const final;
+  std::string ToString() const final;
 
  private:
   unsigned rank_;
-  tfrt::DType dtype_;
+  PrimitiveType dtype_;
   void* data_;
   int64_t offset_;
   // We keep sizes and strides in a single container to save one potential
@@ -288,12 +330,12 @@ class MemrefDesc final : public llvm::RTTIExtends<MemrefDesc, Argument> {
 };
 
 template <typename InitializeSizesAndStrides>
-MemrefDesc::MemrefDesc(unsigned rank, tfrt::DType dtype, void* data,
+MemrefDesc::MemrefDesc(unsigned rank, PrimitiveType dtype, void* data,
                        int64_t offset, InitializeSizesAndStrides initialize)
     : rank_(rank), dtype_(dtype), data_(data), offset_(offset) {
   sizes_and_strides_.resize(2 * rank_);
-  llvm::MutableArrayRef<int64_t> ref = sizes_and_strides_;
-  initialize(ref.drop_back(rank_), ref.drop_front(rank_));
+  auto ref = absl::Span<int64_t>(sizes_and_strides_);
+  initialize(ref.subspan(0, rank_), ref.subspan(rank_));
 }
 
 //===----------------------------------------------------------------------===//
@@ -304,10 +346,10 @@ MemrefDesc::MemrefDesc(unsigned rank, tfrt::DType dtype, void* data,
 // argument: type is a tensor of a memref with compatible element type, and all
 // statically known dimensions match the run-time sizes. Returns user-friendly
 // error message in case of an error.
-llvm::Error VerifyMemrefArgument(unsigned index, const Type& type,
-                                 const MemrefDesc& arg);
+absl::Status VerifyMemrefArgument(unsigned index, const Type& type,
+                                  const MemrefDesc& arg);
 
 }  // namespace runtime
 }  // namespace xla
 
-#endif  // XLA_RUNTIME_ARGUMENTS_H_
+#endif  // TENSORFLOW_COMPILER_XLA_RUNTIME_ARGUMENTS_H_

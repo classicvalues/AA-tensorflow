@@ -4,7 +4,7 @@
 # Throughout this file, all targets are built with the standard crosstool and
 # do not link against restricted binary blobs.
 
-load("//tensorflow:tensorflow.bzl", "tf_cuda_library")
+load("//tensorflow:tensorflow.bzl", "tf_cuda_library", "transitive_hdrs")
 load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load("//tensorflow/core/platform:build_config_root.bzl", "if_static")
 load("//tensorflow/stream_executor:build_defs.bzl", "stream_executor_friends")
@@ -333,6 +333,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":host_or_device_scalar",
         "//tensorflow/compiler/xla/stream_executor:stream_executor_headers",
     ],
 )
@@ -372,12 +373,14 @@ cc_library(
     deps = [":stream_executor_headers"] + if_static([":stream_executor_impl"]),
 )
 
+transitive_hdrs(
+    name = "stream_executor_install_hdrs",
+    deps = [":stream_executor_headers"],
+)
+
 cc_library(
     name = "stream_executor_impl",
-    deps = [
-        "//tensorflow/compiler/xla/stream_executor:dnn_proto_cc_impl",
-        "//tensorflow/compiler/xla/stream_executor:stream_executor_impl",
-    ],
+    deps = ["//tensorflow/compiler/xla/stream_executor:stream_executor_impl"],
 )
 
 cc_library(
@@ -406,7 +409,7 @@ cc_library(
 
 alias(
     name = "cuda_platform",
-    actual = "//tensorflow/stream_executor/cuda:all_runtime",
+    actual = "//tensorflow/compiler/xla/stream_executor/cuda:all_runtime",
 )
 
 alias(

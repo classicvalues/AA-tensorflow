@@ -19,6 +19,7 @@ limitations under the License.
 #include <memory>
 
 #include "llvm/ADT/ArrayRef.h"
+#include "mlir/Pass/Pass.h"
 
 namespace mlir {
 
@@ -35,6 +36,9 @@ class FusionOp;
 }  // namespace lmhlo
 
 namespace lmhlo {
+
+#define GEN_PASS_DECL
+#include "mlir-hlo/Dialect/lhlo/transforms/lmhlo_passes.h.inc"
 
 // Lowers from LHLO dialect to Affine dialect.
 std::unique_ptr<OperationPass<func::FuncOp>> createLhloLegalizeToAffinePass();
@@ -64,8 +68,10 @@ std::unique_ptr<OperationPass<func::FuncOp>> createLegalizeToTensorOpPass();
 // Input inline fusion pass for fusion codegen
 std::unique_ptr<OperationPass<func::FuncOp>> createInputInlineFusionPass();
 
-}  // namespace lmhlo
+#define GEN_PASS_REGISTRATION
+#include "mlir-hlo/Dialect/lhlo/transforms/lmhlo_passes.h.inc"
 
+}  // namespace lmhlo
 }  // namespace mlir
 
 #endif  // MLIR_HLO_DIALECT_LHLO_TRANSFORMS_PASSES_H
