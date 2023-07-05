@@ -94,7 +94,7 @@ Add the TensorFlowLiteTaskText pod in Podfile
 ```
 target 'MySwiftAppWithTaskAPI' do
   use_frameworks!
-  pod 'TensorFlowLiteTaskText', '~> 0.2.0'
+  pod 'TensorFlowLiteTaskText', '~> 0.4.3'
 end
 ```
 
@@ -132,6 +132,31 @@ std::vector<core::Category> categories = classifier->Classify(input_text);
 See the
 [source code](https://github.com/tensorflow/tflite-support/blob/master/tensorflow_lite_support/cc/task/text/nlclassifier/nl_classifier.h)
 for more details.
+
+## Run inference in Python
+
+### Step 1: Install the pip package
+
+```
+pip install tflite-support
+```
+
+### Step 2: Using the model
+
+```python
+# Imports
+from tflite_support.task import text
+
+# Initialization
+classifier = text.NLClassifier.create_from_file(model_path)
+
+# Run inference
+text_classification_result = classifier.classify(text)
+```
+
+See the
+[source code](https://github.com/tensorflow/tflite-support/blob/master/tensorflow_lite_support/python/task/text/nl_classifier.py)
+for more options to configure `NLClassifier`.
 
 ## Example results
 

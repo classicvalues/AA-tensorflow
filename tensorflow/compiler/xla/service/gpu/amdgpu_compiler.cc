@@ -75,7 +75,8 @@ std::string GetROCDLDir(const HloModuleConfig& config) {
 }  // namespace
 
 Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
-    HloModule* hlo_module, se::StreamExecutor* stream_exec,
+    HloModule* hlo_module, GpuVersion gpu_version,
+    se::dnn::VersionInfo dnn_version,
     se::DeviceMemoryAllocator* device_allocator) {
   // Convert convolutions into CustomCalls to MIOpen, then canonicalize them
   // (PadInsertion).
@@ -98,6 +99,7 @@ Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
   // AlgebraicSimplifier  We run algsimp to a fixed point.
   AlgebraicSimplifierOptions options;
   options.set_enable_conv_operand_swap(false);
+  options.set_enable_unconditional_reduce_of_concat_replacement(false);
   pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(options);
 
   pipeline.AddPass<HloConstantFolding>();
@@ -108,9 +110,10 @@ Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
 
 Status AMDGPUCompiler::OptimizeHloPostLayoutAssignment(
     HloModule* hlo_module, se::StreamExecutor* stream_exec,
-    se::DeviceMemoryAllocator* device_allocator) {
+    const CompileOptions& options, const GpuTargetConfig& gpu_target_config,
+    const AutotuneResults* autotune_results) {
   TF_RETURN_IF_ERROR(GpuCompiler::OptimizeHloPostLayoutAssignment(
-      hlo_module, stream_exec, device_allocator));
+      hlo_module, stream_exec, options, gpu_target_config, autotune_results));
 
   HloPassPipeline post_pipeline("AMDGPU post-layout_assignment");
 
@@ -134,9 +137,7 @@ GpuVersion AMDGPUCompiler::GetGpuVersion(se::StreamExecutor* stream_exec) {
 StatusOr<std::pair<std::string, std::vector<uint8_t>>>
 AMDGPUCompiler::CompileTargetBinary(const HloModuleConfig& module_config,
                                     llvm::Module* llvm_module,
-                                    GpuVersion gpu_version,
-                                    se::StreamExecutor* stream_exec,
-                                    bool relocatable,
+                                    GpuVersion gpu_version, bool relocatable,
                                     const HloModule* debug_module) {
   if (rocdl_dir_.empty()) {
     // Compute rocdl_dir_ just once and cache it in this member.
@@ -152,8 +153,9 @@ AMDGPUCompiler::CompileTargetBinary(const HloModuleConfig& module_config,
     XLA_SCOPED_LOGGING_TIMER(
         "AMDGPUCompiler::CompileTargetBinary - CompileToHsaco");
     TF_ASSIGN_OR_RETURN(
-        hsaco, amdgpu::CompileToHsaco(llvm_module, gpu_version, module_config,
-                                      rocdl_dir_));
+        hsaco, amdgpu::CompileToHsaco(llvm_module, gpu_version,
+                                      module_config.debug_options(), rocdl_dir_,
+                                      module_config.compilation_cache_key()));
   }
 
   return std::pair<std::string, std::vector<uint8_t>>("", std::move(hsaco));

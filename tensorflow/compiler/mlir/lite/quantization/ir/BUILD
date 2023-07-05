@@ -3,6 +3,7 @@ load("@llvm-project//mlir:tblgen.bzl", "gentbl_cc_library", "td_library")
 load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_cloud")
 
 package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
 )
@@ -77,7 +78,6 @@ cc_library(
         "ConvertConst.cc",
         "ConvertSimQuant.cc",
         "FakeQuantSupport.cc",
-        "PassDetail.h",
         "QuantOps.cc",
         "QuantizeUtils.cc",
         "UniformSupport.cc",
@@ -101,6 +101,7 @@ cc_library(
         "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:QuantOps",
         "@llvm-project//mlir:SideEffectInterfaces",
+        "@llvm-project//mlir:Support",
         "@llvm-project//mlir:TransformUtils",
     ],
 )

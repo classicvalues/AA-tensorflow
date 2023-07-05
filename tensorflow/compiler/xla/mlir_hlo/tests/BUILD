@@ -2,7 +2,10 @@ load("@llvm-project//llvm:lit_test.bzl", "lit_test", "package_path")
 load("@bazel_skylib//rules:build_test.bzl", "build_test")
 load("@bazel_skylib//rules:expand_template.bzl", "expand_template")
 
-package(licenses = ["notice"])
+package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
+    licenses = ["notice"],
+)
 
 [
     lit_test(
@@ -22,7 +25,6 @@ package(licenses = ["notice"])
         # copybara:uncomment driver = "@llvm-project//mlir:run_lit",
         tags = [
             "nomsan",  # The execution engine doesn't work with msan, see b/248097619.
-            "nopip",  # Don't run as part of the pip wheel test suite.
         ],
     )
     for src in glob(["**/*.mlir"])

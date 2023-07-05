@@ -16,34 +16,24 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_IR_EMITTER_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_IR_EMITTER_H_
 
-#include <functional>
-#include <map>
-#include <memory>
-#include <utility>
 #include <vector>
 
-#include "absl/strings/string_view.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/types/span.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Value.h"
-#include "tensorflow/compiler/xla/service/buffer_assignment.h"
-#include "tensorflow/compiler/xla/service/dfs_hlo_visitor_with_default.h"
+#include "tensorflow/compiler/xla/hlo/ir/dfs_hlo_visitor_with_default.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_computation.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/gpu/elemental_ir_emitter.h"
 #include "tensorflow/compiler/xla/service/gpu/hlo_to_ir_bindings.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emitter_context.h"
-#include "tensorflow/compiler/xla/service/gpu/kernel_thunk.h"
-#include "tensorflow/compiler/xla/service/gpu/thunk.h"
-#include "tensorflow/compiler/xla/service/hlo_computation.h"
-#include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/fused_ir_emitter.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/ir_array.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/ir_builder_mixin.h"
-#include "tensorflow/compiler/xla/service/llvm_ir/llvm_loop.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/loop_emitter.h"
 #include "tensorflow/compiler/xla/statusor.h"
-#include "tensorflow/compiler/xla/types.h"
-#include "tensorflow/compiler/xla/xla_data.pb.h"
 
 namespace xla {
 namespace gpu {
@@ -182,6 +172,10 @@ class IrEmitter : public DfsHloVisitorWithDefault,
   void BindFusionArguments(const HloInstruction* fusion,
                            FusedIrEmitter* fused_emitter);
 
+  // Emit a fence for AMDGPU if necessary.
+  void MaybeEmitFenceForAMDGPU(llvm::AtomicOrdering atomic_ordering,
+                               const char* sync_scope_id);
+
  private:
   // A helper method for EmitAtomicOperationForNestedComputation. Certain
   // computations, such as floating-point addition and integer maximization, can
@@ -226,7 +220,8 @@ class IrEmitter : public DfsHloVisitorWithDefault,
   // Map nested computations to emitted IR functions. This serves as a cache so
   // that IrEmitter does not emit multiple functions for the same
   // HloComputation.
-  std::map<const HloComputation*, llvm::Function*> computation_to_ir_function_;
+  absl::flat_hash_map<const HloComputation*, llvm::Function*>
+      computation_to_ir_function_;
 };
 
 }  // namespace gpu

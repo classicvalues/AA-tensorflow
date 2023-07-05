@@ -15,7 +15,9 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/gpu/ir_emitter.h"
 
-#include "tensorflow/tsl/platform/logging.h"
+#include <iterator>
+#include <utility>
+
 // IWYU pragma: no_include "llvm/IR/Intrinsics.gen.inc"
 #include "absl/algorithm/container.h"
 #include "llvm/IR/BasicBlock.h"
@@ -23,27 +25,20 @@ limitations under the License.
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "tensorflow/compiler/xla/hlo/ir/hlo_computation.h"
 #include "tensorflow/compiler/xla/primitive_util.h"
 #include "tensorflow/compiler/xla/service/elemental_ir_emitter.h"
 #include "tensorflow/compiler/xla/service/gpu/elemental_ir_emitter.h"
 #include "tensorflow/compiler/xla/service/gpu/ir_emitter_nested.h"
-#include "tensorflow/compiler/xla/service/gpu/ir_emitter_unnested.h"
-#include "tensorflow/compiler/xla/service/gpu/launch_dimensions.h"
-#include "tensorflow/compiler/xla/service/hlo_computation.h"
-#include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/fused_ir_emitter.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/ir_array.h"
-#include "tensorflow/compiler/xla/service/llvm_ir/llvm_loop.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/llvm_util.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/loop_emitter.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/tuple_ops.h"
-#include "tensorflow/compiler/xla/service/name_uniquer.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/status_macros.h"
-#include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/compiler/xla/util.h"
-#include "tensorflow/compiler/xla/window_util.h"
-#include "tensorflow/core/lib/core/errors.h"
+#include "tensorflow/tsl/platform/errors.h"
 
 // Convenient function to cast the provided llvm::Value* using IRBuilder
 // to default address space. This is useful in particular for generating
@@ -64,7 +59,6 @@ static llvm::Value* AddrCastToDefault(llvm::Value* arg, llvm::IRBuilder<>& b) {
 
 namespace xla {
 
-using llvm_ir::IrName;
 using llvm_ir::SetToFirstInsertPoint;
 
 namespace gpu {
@@ -154,16 +148,23 @@ Status IrEmitter::EmitCallToNestedComputation(
     const HloComputation& nested_computation,
     absl::Span<llvm::Value* const> operands, llvm::Value* output) {
   TF_RET_CHECK(nested_computation.num_parameters() > 0);
-  llvm::Function*& emitted_function =
-      computation_to_ir_function_[&nested_computation];
-  if (emitted_function == nullptr) {
-    TF_ASSIGN_OR_RETURN(
-        auto ir_emitter_nested,
-        IrEmitterNested::Create(hlo_module_config_, nested_computation,
-                                ir_emitter_context_));
-    TF_RETURN_IF_ERROR(ir_emitter_nested->CodegenNestedComputation());
-    emitted_function = ir_emitter_nested->GetEmittedFunction();
-  }
+
+  TF_ASSIGN_OR_RETURN(
+      llvm::Function * emitted_function, [&]() -> StatusOr<llvm::Function*> {
+        if (auto it = computation_to_ir_function_.find(&nested_computation);
+            it != computation_to_ir_function_.end()) {
+          return it->second;
+        }
+        TF_ASSIGN_OR_RETURN(
+            auto ir_emitter_nested,
+            IrEmitterNested::Create(hlo_module_config_, nested_computation,
+                                    ir_emitter_context_));
+        TF_RETURN_IF_ERROR(ir_emitter_nested->CodegenNestedComputation());
+        return computation_to_ir_function_
+            .insert(
+                {&nested_computation, ir_emitter_nested->GetEmittedFunction()})
+            .first->second;
+      }());
 
   // Operands are in default address space for non-AMDGPU target.
   // However for AMDGPU target, addrspacecast alloca variables from
@@ -236,7 +237,10 @@ bool IrEmitter::MaybeEmitDirectAtomicOperation(
     }
 
     if (IsEmittingForAMDGPU() &&
-        (element_type == F32)) /* is atomic add supported? */ {
+        (element_type == F32 ||
+         (element_type == F16 &&
+          ir_emitter_context_->rocm_compute_capability()
+              .has_fp16_atomics_support()))) /* is atomic add supported? */ {
       EmitAMDGPUAtomicAdd(output_address, source);
       return true;
     }
@@ -682,6 +686,16 @@ void IrEmitter::BindFusionArguments(const HloInstruction* fusion,
           return GetIrArray(*operand, *fusion)
               .EmitReadArrayElement(index, &b_, operand->name());
         });
+  }
+}
+
+void IrEmitter::MaybeEmitFenceForAMDGPU(llvm::AtomicOrdering atomic_ordering,
+                                        const char* sync_scope_id) {
+  if (IsEmittingForAMDGPU() &&
+      ir_emitter_context_->rocm_compute_capability().gcn_arch_name().substr(
+          0, 6) == "gfx90a") {
+    b_.CreateFence(atomic_ordering,
+                   b_.getContext().getOrInsertSyncScopeID(sync_scope_id));
   }
 }
 

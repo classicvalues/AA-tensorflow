@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 // Does not pass ownership of returned PJRT_Api* to caller.
-const PJRT_Api* GetTpuPjrtApi();
+const PJRT_Api* GetPjrtApi();
 
 #ifdef __cplusplus
 }

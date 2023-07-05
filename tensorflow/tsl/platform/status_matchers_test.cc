@@ -18,11 +18,11 @@ limitations under the License.
 #include <string>
 #include <vector>
 
-#include "tensorflow/core/protobuf/error_codes.pb.h"
 #include "tensorflow/tsl/platform/errors.h"
 #include "tensorflow/tsl/platform/status.h"
 #include "tensorflow/tsl/platform/statusor.h"
 #include "tensorflow/tsl/platform/test.h"
+#include "tensorflow/tsl/protobuf/error_codes.pb.h"
 
 namespace tsl {
 namespace testing {
@@ -118,8 +118,8 @@ TEST(IsOkAndHoldsTest, DescribeExpectedValue) {
 TEST(IsOkAndHoldsTest, ExplainNotMatchingStatus) {
   Matcher<StatusOr<int>> is_ok_and_less_than = IsOkAndHolds(LessThan(100));
   StatusOr<int> status = errors::Unknown("Unknown");
-  EXPECT_EQ(ExplainMatch(is_ok_and_less_than, status),
-            "which has status " + PrintToString(status));
+  EXPECT_THAT(ExplainMatch(is_ok_and_less_than, status),
+              HasSubstr("which has status UNKNOWN: Unknown"));
 }
 
 TEST(IsOkAndHoldsTest, ExplainNotMatchingValue) {

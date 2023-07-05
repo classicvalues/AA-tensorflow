@@ -20,6 +20,7 @@ limitations under the License.
 
 #include <functional>
 #include <limits>
+#include <optional>
 
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
@@ -75,16 +76,21 @@ struct AllocatorStats {
 
   // The upper limit of bytes of user allocatable device memory, if such a limit
   // is known.
-  absl::optional<int64_t> bytes_limit;
+  std::optional<int64_t> bytes_limit;
 
   // Stats for reserved memory usage.
   int64_t bytes_reserved;       // Number of bytes reserved.
   int64_t peak_bytes_reserved;  // The peak number of bytes reserved.
   // The upper limit on the number bytes of reservable memory,
   // if such a limit is known.
-  absl::optional<int64_t> bytes_reservable_limit;
+  std::optional<int64_t> bytes_reservable_limit;
 
   int64_t largest_free_block_bytes;  // Largest free block's size in heap.
+
+  // Number of bytes of memory held by the allocator.  This may be higher than
+  // bytes_in_use if the allocator holds a pool of memory (e.g. BFCAllocator).
+  std::optional<int64_t> pool_bytes;
+  std::optional<int64_t> peak_pool_bytes;
 
   AllocatorStats()
       : num_allocs(0),
@@ -317,6 +323,8 @@ struct AllocatorAttributes {
   bool nic_compatible() const { return value & (0x1 << 1); }
   void set_gpu_compatible(bool v) { value |= (static_cast<int>(v) << 2); }
   bool gpu_compatible() const { return value & (0x1 << 2); }
+  void set_use_pjrt_allocator(bool v) { value |= (static_cast<int>(v) << 3); }
+  bool use_pjrt_allocator() const { return value & (0x1 << 3); }
   void Merge(AllocatorAttributes other) {
     value |= other.value;
     if (scope_id != other.scope_id) {

@@ -1,7 +1,13 @@
 # Description:
 #   Python API for XLA.
+load("//tensorflow/compiler/xla/tests:build_defs.bzl", "generate_backend_suites")
 
-package(licenses = ["notice"])
+package(
+    # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
+    licenses = ["notice"],
+)
+
+generate_backend_suites()
 
 py_library(
     name = "types",
@@ -10,9 +16,9 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/compiler/xla:xla_data_proto_py",
-        "//tensorflow/python:dtypes",
-        "//tensorflow/python:platform",
+        "//tensorflow/tsl/python/lib/core:pywrap_ml_dtypes",
         "//third_party/py/numpy",
+        "@ml_dtypes",
     ],
 )
 
@@ -36,5 +42,35 @@ py_library(
         ":types",
         ":xla_shape",
         "//tensorflow/compiler/xla:xla_data_proto_py",
+    ],
+)
+
+py_test(
+    name = "xla_shape_test",
+    srcs = ["xla_shape_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    tags = [
+        "optonly",
+    ],
+    deps = [
+        ":xla_shape",
+        "//third_party/py/numpy",
+        "@absl_py//absl/testing:absltest",
+    ],
+)
+
+py_test(
+    name = "xla_literal_test",
+    srcs = ["xla_literal_test.py"],
+    python_version = "PY3",
+    srcs_version = "PY3",
+    tags = [
+        "optonly",
+    ],
+    deps = [
+        ":xla_literal",
+        "//third_party/py/numpy",
+        "@absl_py//absl/testing:absltest",
     ],
 )
