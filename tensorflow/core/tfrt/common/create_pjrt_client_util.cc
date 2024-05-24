@@ -17,13 +17,13 @@ limitations under the License.
 #include <optional>
 #include <set>
 
-#include "tensorflow/compiler/xla/pjrt/pjrt_client.h"
+#include "xla/pjrt/pjrt_client.h"
 #include "tensorflow/core/tfrt/common/global_state.h"
 #include "tensorflow/core/tfrt/common/pjrt_state.h"
 
 namespace tensorflow {
 
-StatusOr<xla::PjRtClient*> GetOrCreatePjRtClient(
+absl::StatusOr<xla::PjRtClient*> GetOrCreatePjRtClient(
     const DeviceType& device_type,
     std::optional<std::set<int>> allowed_devices) {
   ResourceMgr* rmgr = tfrt_global::GetTFGlobalResourceMgr();
@@ -32,7 +32,7 @@ StatusOr<xla::PjRtClient*> GetOrCreatePjRtClient(
       rmgr->default_container(), kPjRtStateResourceName, &pjrt_state,
       [&](PjRtState** ret) {
         *ret = PjRtState::Create();
-        return OkStatus();
+        return absl::OkStatus();
       }));
   core::ScopedUnref pjrt_state_ref(pjrt_state);
   return pjrt_state->GetOrCreatePjRtClient(device_type);

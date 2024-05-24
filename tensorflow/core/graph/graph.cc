@@ -206,7 +206,7 @@ Status Node::ShrinkTypeInfo(const absl::flat_hash_map<int, int>& index_mapping,
   AddAttr(type_attr_name, new_dtypes);
 
   if (!update_full_type || !def().has_experimental_type()) {
-    return OkStatus();
+    return absl::OkStatus();
   }
   FullTypeDef ft = def().experimental_type();
   if (ft.type_id() != TFT_PRODUCT) {
@@ -229,7 +229,7 @@ Status Node::ShrinkTypeInfo(const absl::flat_hash_map<int, int>& index_mapping,
   }
   MaybeCopyOnWrite();
   *(mutable_def()->mutable_experimental_type()) = new_ft;
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 const std::string& Node::name() const { return props_->node_def.name(); }
@@ -270,7 +270,8 @@ gtl::iterator_range<NeighborIter> Node::in_nodes() const {
 void Node::MaybeCopyOnWrite() {
   // TODO(mdan): As nodes become more dynamic, this may not be worth the cost.
   // NodeProperties may be shared between Nodes. Make a copy if so.
-  if (!props_.unique()) {
+  // TODO(b/338453606): use_count() == 1 has a race condition.
+  if (!(props_.use_count() == 1)) {
     props_ = std::make_shared<NodeProperties>(*props_);
   }
 }
@@ -334,7 +335,7 @@ Status Node::input_edge(int idx, const Edge** e) const {
   for (const Edge* edge : in_edges()) {
     if (edge->dst_input() == idx) {
       *e = edge;
-      return OkStatus();
+      return absl::OkStatus();
     }
   }
 
@@ -363,7 +364,7 @@ Status Node::input_edges(std::vector<const Edge*>* input_edges) const {
       return errors::InvalidArgument("Missing edge input number: ", i);
     }
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status Node::input_node(int idx, Node** n) const {
@@ -374,14 +375,14 @@ Status Node::input_node(int idx, Node** n) const {
   } else {
     *n = e->src();
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status Node::input_node(int idx, const Node** const_n) const {
   Node* n;
   TF_RETURN_IF_ERROR(input_node(idx, &n));
   *const_n = n;
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status Node::input_tensor(int idx, OutputTensor* t) const {
@@ -389,7 +390,7 @@ Status Node::input_tensor(int idx, OutputTensor* t) const {
   TF_RETURN_IF_ERROR(input_edge(idx, &e));
   DCHECK(e != nullptr);
   *t = OutputTensor(e->src(), e->src_output());
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 // NodeDebugInfo
@@ -535,7 +536,7 @@ void Graph::Copy(const Graph& src) {
   }
 }
 
-StatusOr<Node*> Graph::AddNode(NodeDef node_def) {
+absl::StatusOr<Node*> Graph::AddNode(NodeDef node_def) {
   Status s;
   Node* out = AddNode(std::move(node_def), &s);
   TF_RETURN_IF_ERROR(s);
@@ -746,7 +747,17 @@ Status Graph::UpdateEdge(Node* new_src, int new_src_index, Node* dst,
   dst->MaybeCopyOnWrite();
   (*dst->props_->node_def.mutable_input())[dst_index] =
       strings::StrCat(new_src->name(), ":", new_src_index);
-  return OkStatus();
+  return absl::OkStatus();
+}
+
+void Graph::AddInput(NodeDef* dst, StringPiece src_name, int src_slot) {
+  if (src_slot == Graph::kControlSlot) {
+    dst->add_input(strings::StrCat("^", src_name));
+  } else if (src_slot == 0) {
+    dst->add_input(src_name.data(), src_name.size());
+  } else {
+    dst->add_input(strings::StrCat(src_name, ":", src_slot));
+  }
 }
 
 Status Graph::AddWhileInputHack(Node* new_src, int new_src_index, Node* dst) {
@@ -768,7 +779,7 @@ Status Graph::AddWhileInputHack(Node* new_src, int new_src_index, Node* dst) {
   dst->MaybeCopyOnWrite();
   dst->props_->node_def.add_input(
       strings::StrCat(new_src->name(), ":", new_src_index));
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status Graph::AddFunctionLibrary(
@@ -812,22 +823,10 @@ Status Graph::AddGradientDef(const GradientDef& gdef) {
   return ops_.AddGradientDef(gdef);
 }
 
-namespace {
-
-void AddInput(NodeDef* dst, StringPiece src_name, int src_slot) {
-  if (src_slot == Graph::kControlSlot) {
-    dst->add_input(strings::StrCat("^", src_name));
-  } else if (src_slot == 0) {
-    dst->add_input(src_name.data(), src_name.size());
-  } else {
-    dst->add_input(strings::StrCat(src_name, ":", src_slot));
-  }
-}
-
-}  // namespace
-
-void Graph::ToGraphDef(GraphDef* graph_def, bool include_flib_def) const {
-  ToGraphDefSubRange(graph_def, /*from_node_id=*/0, include_flib_def);
+void Graph::ToGraphDef(GraphDef* graph_def, bool include_flib_def,
+                       bool include_debug_info) const {
+  ToGraphDefSubRange(graph_def, /*from_node_id=*/0, include_flib_def,
+                     include_debug_info);
 }
 
 GraphDef Graph::ToGraphDefDebug() const {
@@ -837,12 +836,16 @@ GraphDef Graph::ToGraphDefDebug() const {
 }
 
 void Graph::ToGraphDefSubRange(GraphDef* graph_def, int from_node_id,
-                               bool include_flib_def) const {
+                               bool include_flib_def,
+                               bool include_debug_info) const {
   graph_def->Clear();
   *graph_def->mutable_versions() = versions();
 
   if (include_flib_def) {
     *graph_def->mutable_library() = ops_.ToProto();
+  }
+  if (include_debug_info) {
+    *graph_def->mutable_debug_info() = BuildDebugInfo();
   }
 
   graph_def->mutable_node()->Reserve(std::max(1, num_nodes() - from_node_id));
@@ -928,7 +931,7 @@ Status Graph::IsValidNode(const Node* node) const {
                                    " is different from the passed in node. "
                                    "Does it belong to a different graph?");
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status Graph::IsValidOutputTensor(const Node* node, int idx) const {
@@ -939,7 +942,7 @@ Status Graph::IsValidOutputTensor(const Node* node, int idx) const {
                               "', num of outputs: ", node->num_outputs(),
                               ") does not have ", "output ", idx);
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status Graph::IsValidInputTensor(const Node* node, int idx) const {
@@ -950,7 +953,7 @@ Status Graph::IsValidInputTensor(const Node* node, int idx) const {
                               "', num of inputs: ", node->num_inputs(),
                               ") does not have ", "input ", idx);
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Node* Graph::AllocateNode(std::shared_ptr<NodeProperties> props,
@@ -1019,7 +1022,7 @@ Status Graph::AddWhileContext(StringPiece frame_name,
                                    "' already exists");
   }
   *result = &pair.first->second;
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 std::unordered_map<std::string, Node*> Graph::BuildNodeNameIndex() const {
@@ -1054,7 +1057,7 @@ void Graph::NodeType(StringPiece name, const FullTypeDef** result) {
 
 GraphDebugInfo Graph::BuildDebugInfo() const {
   // Gather stack traces for all nodes associated with function definitions.
-  // Give these a map key in `traces` of <node_name> '@' <function_name>.
+  // Give these a key of <node_name> '@' <function_name>.
   GraphDebugInfoBuilder builder;
   for (const std::string& function_name : flib_def().ListFunctionNames()) {
     if (core::RefCountPtr<FunctionRecord> function_record =
@@ -1072,7 +1075,7 @@ GraphDebugInfo Graph::BuildDebugInfo() const {
     const std::shared_ptr<AbstractStackTrace>& stack_trace =
         node->GetStackTrace();
     if (stack_trace != nullptr) {
-      builder.AccumulateStackTrace(*stack_trace, node->name());
+      builder.AccumulateStackTrace(stack_trace, node->name());
     }
   }
 

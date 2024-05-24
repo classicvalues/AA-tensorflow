@@ -84,12 +84,12 @@ class UnaryOpsTest(xla_test.XLATestCase):
       self.assertAllClose(result[i], expected[i], rtol, atol)
 
   def AssertCloseAndSorted(self, result, expected, rtol, atol):
-    """Tests that result and expeted are both close and sorted."""
+    """Tests that result and expected are both close and sorted."""
     self.assertAllClose(result, expected, rtol, atol)
     self.assertAllEqual(np.sort(result), result)
 
   def AssertAllEqual(self, result, expected, rtol, atol):
-    """Tests that result and expeted are exactly equal."""
+    """Tests that result and expected are exactly equal."""
     self.assertAllEqual(result, expected)
 
   def testAllTypeOps(self):
@@ -260,7 +260,7 @@ class UnaryOpsTest(xla_test.XLATestCase):
 
       self._assertOpOutputMatchesExpected(
           math_ops.is_finite,
-          np.array([[np.NINF, -2, -1, 0, 0.5, 1, 2, np.inf, np.nan]],
+          np.array([[-np.inf, -2, -1, 0, 0.5, 1, 2, np.inf, np.nan]],
                    dtype=dtype),
           expected=np.array([[0, 1, 1, 1, 1, 1, 1, 0, 0]], dtype=np.bool_))
 
@@ -834,12 +834,12 @@ class UnaryOpsTest(xla_test.XLATestCase):
     for dtype in self.float_types:
       self._assertOpOutputMatchesExpected(
           math_ops.is_inf,
-          np.array([[np.NINF, -2, -1, 0, 0.5, 1, 2, np.inf, np.nan]],
+          np.array([[-np.inf, -2, -1, 0, 0.5, 1, 2, np.inf, np.nan]],
                    dtype=dtype),
           expected=np.array([[1, 0, 0, 0, 0, 0, 0, 1, 0]], dtype=np.bool_))
       self._assertOpOutputMatchesExpected(
           math_ops.is_nan,
-          np.array([[np.NINF, -2, -1, 0, 0.5, 1, 2, np.inf, np.nan]],
+          np.array([[-np.inf, -2, -1, 0, 0.5, 1, 2, np.inf, np.nan]],
                    dtype=dtype),
           expected=np.array([[0, 0, 0, 0, 0, 0, 0, 0, 1]], dtype=np.bool_))
       self._assertOpOutputMatchesExpected(

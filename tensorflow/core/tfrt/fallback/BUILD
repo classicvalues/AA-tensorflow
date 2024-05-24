@@ -1,4 +1,3 @@
-load("//tensorflow/core/platform:build_config.bzl", "tf_proto_library")
 load(
     "//tensorflow:tensorflow.bzl",
     "if_mobile",
@@ -6,13 +5,14 @@ load(
     "tf_cc_test",
     "tf_features_nolayering_check_if_ios",
 )
-load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
+load("//tensorflow:tensorflow.default.bzl", "tf_cuda_cc_test")
+load("//tensorflow/core/platform:build_config.bzl", "tf_proto_library")
 load(
     "//tensorflow/core/platform:build_config_root.bzl",
     "if_static",
     "tf_cuda_tests_tags",
 )
-load("//tensorflow:tensorflow.default.bzl", "tf_cuda_cc_test")
+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -40,10 +40,15 @@ cc_library(
     deps = [
         "//tensorflow/core:core_cpu_base",
         "//tensorflow/core:framework",
+        "//tensorflow/core:portable_gif_internal",
         "//tensorflow/core:session_options",
         "//tensorflow/core/common_runtime:core_cpu_internal",
         "//tensorflow/core/common_runtime:device_set",
+        "//tensorflow/core/framework:device_attributes_proto_cc",
         "//tensorflow/core/framework:graph_proto_cc",
+        "//tensorflow/core/platform:strcat",
+        "//tensorflow/core/tpu:virtual_device",
+        "@com_google_absl//absl/strings",
     ],
 )
 
@@ -52,10 +57,13 @@ tf_cc_test(
     srcs = ["fallback_state_test.cc"],
     deps = [
         ":fallback_state",
-        "//tensorflow/core:framework",
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/cc:const_op",
+        "//tensorflow/cc:ops",
+        "//tensorflow/cc:scope",
+        "//tensorflow/core:all_kernels",
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
-        "//tensorflow/core/framework:function_proto_cc",
         "//tensorflow/core/platform:status_matchers",
         "//tensorflow/core/protobuf:error_codes_proto_impl_cc",
     ],
@@ -107,7 +115,6 @@ cc_library(
         "//tensorflow/core:lib",
         "//tensorflow/core/platform:status",
         "//tensorflow/core/util:env_var",
-        "//tensorflow/tsl/platform:mutex",
         "@com_google_absl//absl/container:flat_hash_map",
     ],
 )
@@ -117,7 +124,7 @@ cc_library(
     hdrs = ["device_with_custom_allocator.h"],
     deps = [
         "//tensorflow/core:framework",
-        "//tensorflow/tsl/framework:allocator",
+        "@local_tsl//tsl/framework:allocator",
     ],
 )
 
@@ -126,9 +133,8 @@ tf_cc_test(
     srcs = ["cost_recorder_test.cc"],
     deps = [
         ":cost_recorder",
+        ":op_cost_map_proto_cc",
         "//tensorflow/core:lib",
-        "//tensorflow/core/platform:status",
-        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
     ],
 )

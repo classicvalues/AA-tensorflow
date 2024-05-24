@@ -17,6 +17,7 @@ limitations under the License.
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -84,7 +85,7 @@ StatusOr<mlir::Value> GetAllCandidateCheckpointPrefixes(
       builder
           .create<mlir::TF::AddOp>(
               prefix.getLoc(),
-              prefix.getType().dyn_cast<mlir::RankedTensorType>(), prefix,
+              mlir::dyn_cast<mlir::RankedTensorType>(prefix.getType()), prefix,
               StringConst(builder, prefix.getLoc(),
                           llvm::SmallVector<llvm::StringRef>(
                               {DeviceSuffix(0, mesh.num_devices())})))
@@ -95,7 +96,8 @@ StatusOr<mlir::Value> GetAllCandidateCheckpointPrefixes(
         builder
             .create<mlir::TF::AddOp>(
                 prefix.getLoc(),
-                prefix.getType().dyn_cast<mlir::RankedTensorType>(), prefix,
+                mlir::dyn_cast<mlir::RankedTensorType>(prefix.getType()),
+                prefix,
                 StringConst(builder, prefix.getLoc(),
                             llvm::SmallVector<llvm::StringRef>(
                                 {DeviceSuffix(device_id, mesh.num_devices())})))
@@ -392,7 +394,7 @@ StatusOr<mlir::Operation*> ExpandSaveV2Op(mlir::Operation* op) {
     // inputs. This is generic regardless whether the inputs are constants or
     // just arguments.
     int index = it.index();
-    TF_ASSIGN_OR_RETURN(absl::optional<Layout> layout,
+    TF_ASSIGN_OR_RETURN(std::optional<Layout> layout,
                         ExtractLayoutFromOperand(tensor));
     if (!layout)
       return absl::InvalidArgumentError(
@@ -528,7 +530,7 @@ StatusOr<mlir::Operation*> ExpandMergeV2Op(mlir::Operation* op) {
       mlir::Value zero_scalar,
       CreateZeroScalarConst(
           builder, location,
-          device_id.getType().cast<mlir::TensorType>().getElementType()));
+          mlir::cast<mlir::TensorType>(device_id.getType()).getElementType()));
 
   mlir::TF::NotEqualOp not_equal = builder.create<mlir::TF::NotEqualOp>(
       location, device_id, zero_scalar,
@@ -696,7 +698,7 @@ StatusOr<mlir::Operation*> ExpandDTensorRestoreV2Op(mlir::Operation* op) {
   std::vector<std::vector<int64_t>> input_shapes;
   input_shapes.reserve(input_shapes_attr.size());
   for (const auto& shape : input_shapes_attr) {
-    mlir::TF::ShapeAttr shape_attr = shape.cast<mlir::TF::ShapeAttr>();
+    mlir::TF::ShapeAttr shape_attr = mlir::cast<mlir::TF::ShapeAttr>(shape);
     if (!shape_attr.hasStaticShape()) {
       return absl::InvalidArgumentError(
           llvm::formatv("DTensorRestoreV2Op requires statically known input "
@@ -717,7 +719,8 @@ StatusOr<mlir::Operation*> ExpandDTensorRestoreV2Op(mlir::Operation* op) {
   input_layouts.reserve(input_layouts_attr.size());
   for (const auto& layout : input_layouts_attr.getValue().vec()) {
     input_layouts.push_back(
-        Layout::FromString(layout.cast<mlir::StringAttr>().getValue().str())
+        Layout::FromString(
+            mlir::cast<mlir::StringAttr>(layout).getValue().str())
             .value());
   }
 
@@ -777,7 +780,7 @@ StatusOr<mlir::Operation*> ExpandRestoreV2Op(mlir::Operation* op) {
     Layout& layout = std::get<2>(it);
     new_types.push_back(mlir::RankedTensorType::get(
         layout.LocalShapeFromGlobalShape(shape),
-        type.dyn_cast<mlir::RankedTensorType>().getElementType()));
+        mlir::dyn_cast<mlir::RankedTensorType>(type).getElementType()));
   }
 
   return ExpandRestoreV2OpHelper(
@@ -821,6 +824,7 @@ StatusOr<llvm::SmallVector<Layout>> GetLayoutsFromAssignVariableOps(
       // an IdentityOp, CastOp, or a DTensorSend op on the path. So, skip past
       // these ops first.
       while (llvm::isa<mlir::TF::CastOp, mlir::TF::IdentityOp,
+                       mlir::TF::RelayoutOp, mlir::TF::DTensorLayout,
                        mlir::TF::DTensorSend>(consuming_op)) {
         if (auto send_op =
                 mlir::dyn_cast_or_null<mlir::TF::DTensorSend>(consuming_op)) {
@@ -891,8 +895,10 @@ SaveRestoreSPMDExpander::ComputeLayoutForward(
     // Change the mesh of each layout to `mesh` since RestoreOp always runs on
     // the CPU.
     for (int i = 0; i < layouts.size(); ++i) {
-      Layout host_mesh_layout = layouts[i];
-      host_mesh_layout.set_mesh(mesh);
+      TF_ASSIGN_OR_RETURN(
+          Layout host_mesh_layout,
+          Layout::GetLayout(Layout::LayoutType::kStatic,
+                            layouts[i].sharding_spec_strs(), mesh));
       output_layouts[i] = host_mesh_layout;
     }
     return output_layouts;
@@ -906,7 +912,7 @@ SaveRestoreSPMDExpander::ComputeLayoutForward(
       TF_ASSIGN_OR_RETURN(
           Layout layout,
           Layout::FromString(
-              it.value().cast<mlir::StringAttr>().getValue().str()));
+              mlir::cast<mlir::StringAttr>(it.value()).getValue().str()));
       output_layouts[it.index()] = layout;
     }
     return output_layouts;

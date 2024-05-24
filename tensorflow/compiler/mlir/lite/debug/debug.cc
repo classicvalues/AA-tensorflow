@@ -39,15 +39,16 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "mlir/Pass/PassInstrumentation.h"  // from @llvm-project
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
-#include "re2/re2.h"
+#include "re2/re2.h"  // IWYU pragma: keep
 #include "tensorflow/compiler/mlir/lite/debug/debug_options.pb.h"
 #include "tensorflow/core/platform/logging.h"
-#include "tensorflow/tsl/lib/io/buffered_file.h"
-#include "tensorflow/tsl/platform/env.h"
-#include "tensorflow/tsl/platform/file_system.h"
-#include "tensorflow/tsl/platform/path.h"
-#include "tensorflow/tsl/platform/status.h"
-#include "tensorflow/tsl/platform/stringpiece.h"
+#include "tsl/lib/io/buffered_file.h"
+#include "tsl/platform/env.h"
+#include "tsl/platform/file_system.h"
+#include "tsl/platform/path.h"
+#include "tsl/platform/status.h"
+#include "tsl/platform/stringpiece.h"
+// IWYU pragma: no_include "util/regexp/re2/re2.h"
 
 namespace tensorflow {
 namespace {
@@ -86,7 +87,7 @@ struct WritableFileRawStream : public llvm::raw_ostream {
 };
 
 // Reproducer stream that emits a reproducer to the given `llvm::raw_ostream`.
-class ReproducerStream : public mlir::PassManager::ReproducerStream {
+class ReproducerStream : public mlir::ReproducerStream {
  public:
   ReproducerStream(std::string name, std::unique_ptr<llvm::raw_ostream> os)
       : name_(std::move(name)), os_(std::move(os)) {}
@@ -102,12 +103,12 @@ class ReproducerStream : public mlir::PassManager::ReproducerStream {
 
 // Returns a function that builds a reproducer stream, or nullptr if the MLIR
 // reproducer will not be enabled.
-mlir::PassManager::ReproducerStreamFactory GetReproducerStreamFactory(
+mlir::ReproducerStreamFactory GetReproducerStreamFactory(
     absl::string_view dump_dir) {
   std::string path = tsl::io::JoinPath(dump_dir, "tfl_mlir_crash_repro.mlir");
 
-  return [path = std::move(path)](std::string& error)
-             -> std::unique_ptr<mlir::PassManager::ReproducerStream> {
+  return [path = std::move(path)](
+             std::string& error) -> std::unique_ptr<mlir::ReproducerStream> {
     std::unique_ptr<tsl::WritableFile> file;
     if (auto status = tsl::Env::Default()->NewWritableFile(path, &file);
         !status.ok()) {
@@ -149,7 +150,7 @@ std::string Sanitize(absl::string_view string) {
 }
 
 // Pass instrumentation that dumps MLIR based on the criteria specified by
-// `mlir_dump_*` debug options.
+// `ir_dump_*` debug options.
 //
 // While `mlir::PassManager::enableIRPrinting` provides a similar functionality,
 // it is cumbersome to manually copy printed IRs and run them with `tf-opt`.
@@ -261,12 +262,39 @@ class DumpInstrumentation : public mlir::PassInstrumentation {
   bool printed_ = false;
 };
 
+std::function<bool(mlir::Pass*, mlir::Operation*)> CreatePrintIRFun(
+    const std::string& pass_regex) {
+  std::function<bool(mlir::Pass*, mlir::Operation*)> fun;
+  if (pass_regex.empty()) {
+    return fun;
+  }
+  return [pr = pass_regex](mlir::Pass* p, mlir::Operation*) {
+    static const RE2* const re = new RE2(pr);
+    if (RE2::FullMatch(p->getName(), *re)) {
+      return true;
+    }
+    return false;
+  };
+}
+
 }  // namespace
 
 void InitPassManager(mlir::PassManager& pm,
-                     const converter::DebugOptions& options) {
-  std::string dump_dir = options.mlir_dump_dir();
-  if (!dump_dir.empty()) {
+                     const converter::DebugOptions& options,
+                     llvm::raw_ostream& out) {
+  std::string dump_dir = options.ir_dump_dir();
+
+  bool dump_to_dir = !dump_dir.empty();
+  bool print_to_stdout =
+      !options.print_ir_before().empty() || !options.print_ir_after().empty();
+
+  if (dump_to_dir || print_to_stdout) {
+    // Necessary for maintaining sequence of passes when dumping MLIR to files
+    // or stdout.
+    pm.getContext()->disableMultithreading();
+  }
+
+  if (dump_to_dir) {
     dump_dir = tsl::io::JoinPath(
         dump_dir, absl::FormatTime("%E4Y%m%d_%H%M%E6S", absl::Now(),
                                    absl::LocalTimeZone()));
@@ -285,17 +313,33 @@ void InitPassManager(mlir::PassManager& pm,
     }
 
     pm.addInstrumentation(std::make_unique<DumpInstrumentation>(
-        dump_dir, options.mlir_dump_pass_regex(),
-        options.mlir_dump_func_regex()));
+        dump_dir, options.ir_dump_pass_regex(), options.ir_dump_func_regex()));
+  }
 
-    // Necessary for maintaining MLIR dump file name sequence to represent
-    // order.
-    pm.getContext()->disableMultithreading();
+  if (print_to_stdout) {
+    std::function<bool(mlir::Pass*, mlir::Operation*)>
+        should_print_ir_before_pass(
+            CreatePrintIRFun(options.print_ir_before()));
+    std::function<bool(mlir::Pass*, mlir::Operation*)>
+        should_print_ir_after_pass(CreatePrintIRFun(options.print_ir_after()));
+
+    mlir::OpPrintingFlags opPrintingFlags = mlir::OpPrintingFlags();
+
+    if (options.has_elide_elementsattrs_if_larger()) {
+      opPrintingFlags.elideLargeElementsAttrs(
+          options.elide_elementsattrs_if_larger());
+    }
+
+    pm.enableIRPrinting(should_print_ir_before_pass, should_print_ir_after_pass,
+                        options.print_ir_module_scope(),
+                        /*printAfterOnlyOnChange=*/true,
+                        /*printAfterOnlyOnFailure=*/false, out,
+                        opPrintingFlags);
   }
 
   // Enable pass timing. Note: MLIR expects `mlir::PassManager::enableTiming` to
   // be called after all instrumentations are added.
-  if (options.mlir_enable_timing()) {
+  if (options.enable_timing()) {
     pm.enableTiming();
   }
 }

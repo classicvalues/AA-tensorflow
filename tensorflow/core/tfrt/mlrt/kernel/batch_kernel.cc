@@ -14,16 +14,21 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/core/tfrt/mlrt/kernel/batch_kernel.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <memory>
 #include <utility>
 #include <vector>
 
+#include "google/protobuf/text_format.h"
 #include "absl/base/optimization.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/core/framework/op_kernel.h"
+#include "tensorflow/core/framework/types.h"
+#include "tensorflow/core/kernels/batching_util/batch_resource_base.h"
 #include "tensorflow/core/kernels/batching_util/batch_scheduler.h"
+#include "tensorflow/core/platform/status.h"
 #include "tensorflow/core/platform/statusor.h"
 #include "tensorflow/core/runtime_fallback/runtime/fallback_batch_kernel.h"
 #include "tensorflow/core/tfrt/fallback/op_kernel_runner_cache.h"
@@ -46,6 +51,7 @@ struct BatchFunctionOp : mlrt::KernelFrame {
   using KernelFrame::KernelFrame;
 
   static constexpr char kName[] = "tf_mlrt.batch_function";
+  static constexpr bool kUseCustomDevice = false;
 
   mlrt::RegisterValueSpan<tfrt_stub::FallbackTensor> args() const {
     return arguments();
@@ -125,7 +131,15 @@ void BatchFunctionOp::Invoke() {
   auto attr_builder = [node_def_text = node_def_text(),
                        f = f()](tensorflow::AttrValueMap* attr_value_map) {
     tensorflow::NodeDef node_def;
-    if (!proto2::TextFormat::ParseFromString(node_def_text, &node_def)) {
+    // TODO(182876485): Remove the conditional selection after protobuf version
+    // is bumped up.
+    if (!google::protobuf::TextFormat::ParseFromString(
+#if defined(PLATFORM_GOOGLE)
+            node_def_text,
+#else
+            std::string(node_def_text),
+#endif
+            &node_def)) {
       return absl::InternalError(
           absl::StrCat("CreateOp: failed to parse NodeDef: ", node_def_text));
     }
@@ -135,7 +149,7 @@ void BatchFunctionOp::Invoke() {
     auto ptr_value = absl::bit_cast<int64_t>(f);
     (*attr_value_map)["opaque_function_handle"].set_i(ptr_value);
 
-    return OkStatus();
+    return absl::OkStatus();
   };
 
   tfrt::Location loc;
@@ -180,14 +194,14 @@ class MlrtBatchResource : public tensorflow::serving::BatchResourceBase {
 
   // This can only be called in Compute() and ComputeAsync() because thread
   // local is used to pass the context.
-  static StatusOr<std::unique_ptr<BatchTask>> CreateBatchTask(
+  static absl::StatusOr<std::unique_ptr<BatchTask>> CreateBatchTask(
       OpKernelContext*) {
     return {std::make_unique<MlrtBatchTask>(GetBatchFunctionMlrtContext())};
   }
 
   // This can only be called in Compute() and ComputeAsync() because thread
   // local is used to pass the context.
-  static StatusOr<tfrt::ResourceContext*> GetClientGraphResourceContext(
+  static absl::StatusOr<tfrt::ResourceContext*> GetClientGraphResourceContext(
       OpKernelContext*) {
     const auto& context =
         GetBatchFunctionMlrtContext()->GetUserContext<Context>();
@@ -204,26 +218,29 @@ class MlrtBatchResource : public tensorflow::serving::BatchResourceBase {
     return batch_function.name();
   }
 
-  static Status Create(OpKernelContext* c, int32_t num_batch_threads,
-                       int32_t max_batch_size, int32_t batch_timeout_micros,
-                       int32_t max_enqueued_batches,
-                       const std::vector<int32_t>& allowed_batch_sizes,
+  static Status Create(OpKernelContext* c,
+                       const serving::BatchResourceOptions& options,
                        mlrt::bc::Function function,
                        bool enable_large_batch_splitting, bool disable_padding,
                        std::unique_ptr<MlrtBatchResource>* resource) {
     BatcherT::Options batcher_options;
-    batcher_options.num_batch_threads = num_batch_threads;
+    batcher_options.num_batch_threads = options.num_batch_threads;
     std::shared_ptr<BatcherT> batcher;
     TF_RETURN_IF_ERROR(BatcherT::Create(batcher_options, &batcher));
 
     resource->reset(new MlrtBatchResource(
         function, std::move(batcher),
-        GetBatcherQueueOptions(num_batch_threads, max_batch_size,
-                               batch_timeout_micros, max_enqueued_batches,
-                               allowed_batch_sizes,
-                               enable_large_batch_splitting, disable_padding),
-        allowed_batch_sizes));
-    return OkStatus();
+        GetBatcherQueueOptions(
+            options.num_batch_threads, options.max_batch_size,
+            options.batch_timeout_micros, options.max_enqueued_batches,
+            options.allowed_batch_sizes, enable_large_batch_splitting,
+            disable_padding, options.low_priority_max_batch_size,
+            options.low_priority_batch_timeout_micros,
+            options.low_priority_max_enqueued_batches,
+            options.low_priority_allowed_batch_sizes,
+            options.mixed_priority_batching_policy),
+        options.allowed_batch_sizes));
+    return absl::OkStatus();
   }
 
   static Status Create(
@@ -245,7 +262,7 @@ class MlrtBatchResource : public tensorflow::serving::BatchResourceBase {
                                        true /* enable large batch split */,
                                        allowed_batch_sizes, disable_padding),
         allowed_batch_sizes));
-    return OkStatus();
+    return absl::OkStatus();
   }
 
   string DebugString() const final { return "MlrtBatchResource"; }
@@ -299,10 +316,8 @@ void MlrtBatchResource::ProcessFuncBatchImpl(
   const auto& caller_fallback_request_state =
       caller_tf_context.fallback_request_state();
 
-  // Using the same logic as in the c'tor of FunctionLibraryRuntime::Options,
-  // to avoid clash with any Session-generated step ID. DirectSession and
-  // MasterSession generates non-negative step IDs.
-  int64_t step_id = -std::abs(static_cast<int64_t>(random::New64()));
+  // Connect to the batch step id propagated from batch task.
+  int64_t step_id = caller_fallback_request_state.step_id();
 
   // Copy per-request states to create a new KernelFallbackCompatRequestState.
   //
@@ -322,19 +337,25 @@ void MlrtBatchResource::ProcessFuncBatchImpl(
   fallback_request_state.set_client_graph_resource_context(
       caller_fallback_request_state.client_graph_resource_context());
 
-  tensorflow::profiler::TraceMeProducer activity(
+  fallback_request_state.set_cancellation_manager(
+      caller_fallback_request_state.cancellation_manager());
+  fallback_request_state.set_runtime_config(
+      caller_fallback_request_state.runtime_config());
+
+  tsl::profiler::TraceMeProducer activity(
       // To TraceMeConsumers in WorkQueue.
       [step_id] {
-        return tensorflow::profiler::TraceMeEncode(
-            "RunMlrtFunction", {{"id", step_id}, {"_r", 1}});
+        return tsl::profiler::TraceMeEncode("RunMlrtFunction",
+                                            {{"id", step_id}, {"_r", 1}});
       },
-      tensorflow::profiler::ContextType::kTfrtExecutor, step_id,
-      tensorflow::profiler::TraceMeLevel::kInfo);
+      tsl::profiler::ContextType::kTfrtExecutor, step_id,
+      tsl::profiler::TraceMeLevel::kInfo);
 
   // Copy the ExecutionContext and its user contexts for async execution.
   auto user_contexts = caller_context.CopyUserContexts();
   mlrt::ExecutionContext execution_context(&caller_context.loaded_executable(),
-                                           std::move(user_contexts));
+                                           std::move(user_contexts),
+                                           caller_context.user_error_loggers());
   execution_context.GetUserContext<tf_mlrt::Context>()
       .set_fallback_request_state(&fallback_request_state);
 
@@ -368,6 +389,13 @@ void MlrtBatchResource::ProcessFuncBatchImpl(
 
 REGISTER_KERNEL_BUILDER(
     Name(kMlrtBatchFunctionName).Device(DEVICE_CPU),
+    tfrt_stub::BatchFunctionFallbackKernel<MlrtBatchResource>);
+
+// TFRT does not depend on the device annotation.
+// MLRT Batch function will not actually execute on GPU, but rather on CPU.
+// This kernel is registered on accelerator to get through the check.
+REGISTER_KERNEL_BUILDER(
+    Name(kMlrtBatchFunctionName).Device(DEVICE_GPU),
     tfrt_stub::BatchFunctionFallbackKernel<MlrtBatchResource>);
 
 // Identical to BatchFunction except it has 2 extra TFRT attributes and it does

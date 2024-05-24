@@ -16,11 +16,13 @@ limitations under the License.
 #include "tensorflow/dtensor/mlir/ir/tf_dtensor.h"
 
 #include <cstdint>
+#include <string>
 
 #include "llvm/Support/FormatVariadic.h"
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "mlir/IR/OpImplementation.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_dialect.h"
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_ops.h"
@@ -37,13 +39,13 @@ namespace {
 RankedTensorType GetRankedTensorType(mlir::Value val) {
   mlir::Type type = val.getType();
   if (auto type_with_subtype =
-          mlir::getElementTypeOrSelf(val)
-              .dyn_cast<mlir::TF::TensorFlowTypeWithSubtype>()) {
+          mlir::dyn_cast<mlir::TF::TensorFlowTypeWithSubtype>(
+              mlir::getElementTypeOrSelf(val))) {
     if (type_with_subtype.GetSubtypes().size() == 1) {
       type = type_with_subtype.GetSubtypes().front();
     }
   }
-  return type.dyn_cast_or_null<RankedTensorType>();
+  return mlir::dyn_cast_or_null<RankedTensorType>(type);
 }
 }  // namespace
 
@@ -109,7 +111,7 @@ mlir::LogicalResult DTensorAllGatherOp::verify() {
   }
 
   RankedTensorType input_type =
-      op.getInput().getType().dyn_cast<RankedTensorType>();
+      mlir::dyn_cast<RankedTensorType>(op.getInput().getType());
   if (!input_type) return mlir::success();
 
   if (input_type.getRank() != input_layout.rank())
@@ -118,7 +120,7 @@ mlir::LogicalResult DTensorAllGatherOp::verify() {
            << " is not equal to input rank " << input_type.getRank();
 
   RankedTensorType output_type =
-      op.getOutput().getType().dyn_cast<RankedTensorType>();
+      mlir::dyn_cast<RankedTensorType>(op.getOutput().getType());
   if (!output_type) return mlir::success();
 
   if (output_type.getRank() != output_layout.rank())
@@ -165,7 +167,7 @@ mlir::LogicalResult DTensorAllScatterOp::verify() {
   }
 
   RankedTensorType input_type =
-      op.getInput().getType().dyn_cast<RankedTensorType>();
+      mlir::dyn_cast<RankedTensorType>(op.getInput().getType());
   if (!input_type) return mlir::success();
 
   if (input_type.getRank() != input_layout.rank())
@@ -174,7 +176,7 @@ mlir::LogicalResult DTensorAllScatterOp::verify() {
            << " is not equal to input rank " << input_type.getRank();
 
   RankedTensorType output_type =
-      op.getOutput().getType().dyn_cast<RankedTensorType>();
+      mlir::dyn_cast<RankedTensorType>(op.getOutput().getType());
   if (!output_type) return mlir::success();
 
   if (output_type.getRank() != output_layout.rank())
@@ -210,8 +212,8 @@ mlir::LogicalResult DTensorAllToAllOp::verify() {
 
   int32_t num_split_dims = 0;
   int32_t num_concat_dims = 0;
-  tensorflow::dtensor::ShardingSpec split_spec;
-  tensorflow::dtensor::ShardingSpec concat_spec;
+  std::string split_spec;
+  std::string concat_spec;
   for (int32_t i = 0; i < input_layout.rank(); ++i) {
     if (input_layout.sharding_spec(i) == output_layout.sharding_spec(i))
       continue;
@@ -220,23 +222,23 @@ mlir::LogicalResult DTensorAllToAllOp::verify() {
         tensorflow::dtensor::Layout::IsShardedDimension(
             output_layout.sharding_spec(i))) {
       num_split_dims++;
-      split_spec = output_layout.dim(i);
+      split_spec = output_layout.sharding_spec(i);
     } else if (tensorflow::dtensor::Layout::IsShardedDimension(
                    input_layout.sharding_spec(i)) &&
                tensorflow::dtensor::Layout::IsUnshardedDimension(
                    output_layout.sharding_spec(i))) {
       num_concat_dims++;
-      concat_spec = input_layout.dim(i);
+      concat_spec = input_layout.sharding_spec(i);
     }
   }
   if (num_split_dims != 1 || num_concat_dims != 1 ||
-      split_spec.sharding_spec() != concat_spec.sharding_spec()) {
+      split_spec != concat_spec) {
     return op.emitOpError() << "must have one mesh dimension which is being "
                                "unsharded in one axis and sharded in another";
   }
 
   RankedTensorType input_type =
-      op.getInput().getType().dyn_cast<RankedTensorType>();
+      mlir::dyn_cast<RankedTensorType>(op.getInput().getType());
   if (!input_type) return mlir::success();
 
   if (input_type.getRank() != input_layout.rank())
@@ -245,7 +247,7 @@ mlir::LogicalResult DTensorAllToAllOp::verify() {
            << " is not equal to input rank " << input_type.getRank();
 
   RankedTensorType output_type =
-      op.getOutput().getType().dyn_cast<RankedTensorType>();
+      mlir::dyn_cast<RankedTensorType>(op.getOutput().getType());
   if (!output_type) return mlir::success();
 
   if (output_type.getRank() != output_layout.rank())

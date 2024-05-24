@@ -14,6 +14,7 @@ limitations under the License.
 ==============================================================================*/
 #include "tensorflow/core/data/service/worker_client.h"
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -35,7 +36,10 @@ limitations under the License.
 #include "tensorflow/core/data/service/worker.grpc.pb.h"
 #include "tensorflow/core/data/service/worker.pb.h"
 #include "tensorflow/core/data/service/worker_impl.h"
+#include "tensorflow/core/framework/allocator.h"
 #include "tensorflow/core/framework/dataset.pb.h"
+#include "tensorflow/core/framework/device_base.h"
+#include "tensorflow/core/framework/metrics.h"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/framework/tensor_types.h"
@@ -47,16 +51,19 @@ limitations under the License.
 #include "tensorflow/core/platform/statusor.h"
 #include "tensorflow/core/platform/thread_annotations.h"
 #include "tensorflow/core/platform/types.h"
-#include "tensorflow/tsl/platform/errors.h"
+#include "tsl/platform/errors.h"
 
 namespace tensorflow {
 namespace data {
 
-StatusOr<std::unique_ptr<DataServiceWorkerClient>>
-CreateDataServiceWorkerClient(const std::string& dispatcher_protocol,
-                              const DataTransferServerInfo& info) {
+absl::StatusOr<std::unique_ptr<DataServiceWorkerClient>>
+CreateDataServiceWorkerClient(
+    const std::string& dispatcher_protocol, const DataTransferServerInfo& info,
+    const DeviceBase::AcceleratorDeviceInfo* accelerator_device_info,
+    Allocator* allocator) {
   auto client = std::make_unique<DataServiceWorkerClient>(
-      info.address(), dispatcher_protocol, info.protocol());
+      info.address(), dispatcher_protocol, info.protocol(),
+      accelerator_device_info, allocator);
   TF_RETURN_IF_ERROR(client->Initialize());
   TF_RETURN_WITH_CONTEXT_IF_ERROR(
       client->CheckCompatibility(info.compatibility_info()),
@@ -75,11 +82,12 @@ Status DataServiceWorkerClient::GetElement(const GetElementRequest& req,
 Status DataServiceWorkerClient::EnsureInitialized() {
   mutex_lock l(mu_);
   if (client_) {
-    return OkStatus();
+    return absl::OkStatus();
   }
   TF_RETURN_IF_ERROR(DataTransferClient::Build(
-      GetDataTransferProtocol(), {protocol_, address_}, &client_));
-  return OkStatus();
+      GetDataTransferProtocol(),
+      {protocol_, address_, accelerator_device_info_, allocator_}, &client_));
+  return absl::OkStatus();
 }
 
 std::string DataServiceWorkerClient::GetDataTransferProtocol() const {
@@ -123,10 +131,14 @@ class GrpcDataTransferClient : public DataTransferClient {
       });
     }
     GetElementResponse resp;
+    int64_t start_time_us = env_->NowMicros();
     grpc::Status s = stub_->GetElement(&ctx, req, &resp);
+    int64_t end_time_us = env_->NowMicros();
     if (!s.ok()) {
       return grpc_util::WrapError("Failed to get element", s);
     }
+    metrics::RecordTFDataServiceGetElementDuration(kGrpcTransferProtocol,
+                                                   end_time_us - start_time_us);
     result.end_of_sequence = resp.end_of_sequence();
     result.skip = resp.skip_task();
     switch (resp.element_case()) {
@@ -147,7 +159,7 @@ class GrpcDataTransferClient : public DataTransferClient {
       case GetElementResponse::ELEMENT_NOT_SET:
         break;
     }
-    return OkStatus();
+    return absl::OkStatus();
   }
 
   void TryCancel() override {
@@ -182,7 +194,7 @@ class GrpcTransferClientRegistrar {
               config.protocol, &credentials));
           *out = std::make_unique<GrpcDataTransferClient>(credentials,
                                                           config.address);
-          return OkStatus();
+          return absl::OkStatus();
         });
   }
 };
@@ -202,7 +214,13 @@ class LocalDataTransferClient : public DataTransferClient {
     TF_RETURN_IF_ERROR(VerifyClientIsNotCancelled());
     TF_ASSIGN_OR_RETURN(std::shared_ptr<DataServiceWorkerImpl> worker,
                         GetWorker(req));
-    return worker->GetElementResult(&req, &result);
+    int64_t start_time_us = env_->NowMicros();
+    Status s = worker->GetElementResult(&req, &result);
+    int64_t end_time_us = env_->NowMicros();
+    TF_RETURN_IF_ERROR(s);
+    metrics::RecordTFDataServiceGetElementDuration(kLocalTransferProtocol,
+                                                   end_time_us - start_time_us);
+    return s;
   }
 
   void TryCancel() override {
@@ -222,10 +240,10 @@ class LocalDataTransferClient : public DataTransferClient {
       return errors::Cancelled(absl::Substitute(
           "Client for worker $0 has been cancelled.", worker_address_));
     }
-    return OkStatus();
+    return absl::OkStatus();
   }
 
-  StatusOr<std::shared_ptr<DataServiceWorkerImpl>> GetWorker(
+  absl::StatusOr<std::shared_ptr<DataServiceWorkerImpl>> GetWorker(
       const GetElementRequest& req) const {
     std::shared_ptr<DataServiceWorkerImpl> worker =
         LocalWorkers::Get(worker_address_);
@@ -251,7 +269,7 @@ class LocalTransferClientRegistrar {
         kLocalTransferProtocol, [](DataTransferClient::Config config,
                                    std::unique_ptr<DataTransferClient>* out) {
           *out = std::make_unique<LocalDataTransferClient>(config.address);
-          return OkStatus();
+          return absl::OkStatus();
         });
   }
 };

@@ -1,6 +1,7 @@
 # DTensor Python API and libraries.
 
 load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+load("//tensorflow:strict.default.bzl", "py_strict_library")
 load("//tensorflow:tensorflow.bzl", "tf_gen_op_wrapper_py")
 
 default_visibility = [
@@ -17,7 +18,7 @@ package(
 # -----------------------------------------------------------------------------
 # A list of all modules linked into TensorFlow.
 
-py_library(
+py_strict_library(
     name = "dtensor",
     srcs = ["__init__.py"],
     visibility = [
@@ -51,7 +52,7 @@ pytype_strict_library(
         ":layout",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/framework:ops",
-        "//tensorflow/python/framework:tensor_util",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:tf_export",
     ],
@@ -72,6 +73,13 @@ pytype_strict_library(
 tf_gen_op_wrapper_py(
     name = "gen_dtensor_ops",
     out = "gen_dtensor_ops.py",
+    extra_py_deps = [
+        "//tensorflow/python:pywrap_tfe",
+        "//tensorflow/python/util:dispatch",
+        "//tensorflow/python/util:deprecation",
+        "//tensorflow/python/util:tf_export",
+    ],
+    py_lib_rule = py_strict_library,
     deps = [
         "//tensorflow/dtensor/cc:dtensor_ops",
         "//tensorflow/dtensor/cc:dtensor_tpu_ops",
@@ -86,8 +94,28 @@ pytype_strict_library(
         "//tensorflow/python:_pywrap_dtensor_device",
         "//tensorflow/python/framework:device",
         "//tensorflow/python/framework:ops",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/util:tf_export",
         "//third_party/py/numpy",
+    ],
+)
+
+pytype_strict_library(
+    name = "d_random",
+    srcs = ["d_random.py"],
+    srcs_version = "PY3",
+    deps = [
+        ":api",
+        ":layout",
+        "//tensorflow/python/eager:context",
+        "//tensorflow/python/framework:dtypes",
+        "//tensorflow/python/framework:ops",
+        "//tensorflow/python/framework:tensor_shape",
+        "//tensorflow/python/ops:array_ops",
+        "//tensorflow/python/ops:math_ops",
+        "//tensorflow/python/ops:math_ops_gen",
+        "//tensorflow/python/ops:shape_util",
+        "//tensorflow/python/ops:stateless_random_ops_gen",
     ],
 )
 
@@ -171,7 +199,7 @@ pytype_strict_library(
         "//tensorflow/python/eager:context",
         "//tensorflow/python/framework:errors",
         "//tensorflow/python/framework:ops",
-        "//tensorflow/python/ops:array_ops",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/ops:io_ops",
         "//tensorflow/python/ops:variables",
         "//tensorflow/python/util:tf_export",
@@ -196,6 +224,7 @@ pytype_strict_library(
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/framework:sparse_tensor",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:tensor_util",
         "//tensorflow/python/util:_pywrap_utils",
         "//third_party/py/numpy",
@@ -295,6 +324,7 @@ pytype_strict_library(
         ":config",
         ":layout",
         "//tensorflow/python/data/experimental/ops:data_service_ops",
+        "//tensorflow/python/data/experimental/ops:distribute",
         "//tensorflow/python/data/ops:dataset_ops",
         "//tensorflow/python/data/ops:iterator_ops",
         "//tensorflow/python/eager:context",
@@ -302,6 +332,7 @@ pytype_strict_library(
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
         "//tensorflow/python/framework:ops",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:tensor_shape",
         "//tensorflow/python/framework:tensor_spec",
         "//tensorflow/python/ops:array_ops",

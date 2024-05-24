@@ -1,10 +1,12 @@
-load("//tensorflow:pytype.default.bzl", "pytype_library")
-load("//tensorflow/tsl:tsl.default.bzl", "tsl_pybind_extension")
+load("@local_xla//xla/tsl:tsl.default.bzl", "tsl_pybind_extension")
+load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+load("//tensorflow:strict.default.bzl", "py_strict_test")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
         ":friends",
+        "//tensorflow/tools/pip_package:__subpackages__",
     ],
     licenses = ["notice"],
 )
@@ -36,7 +38,7 @@ tsl_pybind_extension(
     ],
 )
 
-pytype_library(
+pytype_strict_library(
     name = "stablehlo",
     srcs = ["stablehlo.py"],
     srcs_version = "PY3",
@@ -46,11 +48,12 @@ pytype_library(
     ],
 )
 
-py_test(
+py_strict_test(
     name = "stablehlo_test",
     srcs = ["stablehlo_test.py"],
     python_version = "PY3",
     deps = [
         ":stablehlo",
+        #internal proto upb dep
     ],
 )

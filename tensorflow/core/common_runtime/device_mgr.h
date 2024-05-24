@@ -65,7 +65,7 @@ class DeviceMgr {
 
   // Clears given containers of all devices if 'container' is
   // non-empty. Otherwise, clears default containers of all devices.
-  virtual void ClearContainers(gtl::ArraySlice<string> containers) const = 0;
+  virtual void ClearContainers(absl::Span<const string> containers) const = 0;
 
   virtual int NumDeviceType(const string& type) const = 0;
 
@@ -75,7 +75,8 @@ class DeviceMgr {
   // nullptr.
   virtual Device* HostCPU() const = 0;
 
-  TF_DISALLOW_COPY_AND_ASSIGN(DeviceMgr);
+  DeviceMgr(const DeviceMgr&) = delete;
+  void operator=(const DeviceMgr&) = delete;
 };
 
 
@@ -101,7 +102,7 @@ class DynamicDeviceMgr : public DeviceMgr {
   string DeviceMappingString() const override;
   Status LookupDevice(StringPiece name, Device** device) const override;
   bool ContainsDevice(int64_t device_incarnation) const override;
-  void ClearContainers(gtl::ArraySlice<string> containers) const override;
+  void ClearContainers(absl::Span<const string> containers) const override;
   int NumDeviceType(const string& type) const override;
   int NumDevices() const override;
   Device* HostCPU() const override;
@@ -165,7 +166,8 @@ class DynamicDeviceMgr : public DeviceMgr {
   // buffer only for that purpose.
   DeviceCircularBuffer stale_devices_ TF_GUARDED_BY(devices_mu_);
 
-  TF_DISALLOW_COPY_AND_ASSIGN(DynamicDeviceMgr);
+  DynamicDeviceMgr(const DynamicDeviceMgr&) = delete;
+  void operator=(const DynamicDeviceMgr&) = delete;
 };
 
 // TODO(b/183966398): Remove StaticDeviceMgr since there's no usage.

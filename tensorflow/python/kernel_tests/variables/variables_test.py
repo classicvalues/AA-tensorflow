@@ -26,6 +26,7 @@ from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors_impl
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import test_util
 from tensorflow.python.ops import array_ops
@@ -377,7 +378,7 @@ class VariablesTestCase(test.TestCase, parameterized.TestCase):
     for attr in functools.WRAPPER_ASSIGNMENTS:
       self.assertEqual(
           getattr(variables.Variable.__add__, attr),
-          getattr(ops.Tensor.__add__, attr))
+          getattr(tensor.Tensor.__add__, attr))
 
   @test_util.run_deprecated_v1
   def testOperators(self):
@@ -644,6 +645,29 @@ class VariablesTestCase(test.TestCase, parameterized.TestCase):
     v4 = cls(1.0, synchronization=variables.VariableSynchronization.ON_READ,
              trainable=False)
     self.assertEqual(False, v4.trainable)
+
+  def testSaveSliceInfoFromSpecPasses(self):
+    save_slice_info = variables.Variable.SaveSliceInfo(
+        full_name="foo",
+        full_shape=[2, 3, 4],
+        var_offset=[0, 2, 0],
+        var_shape=[1, 1, 3])
+
+    save_slice_info_from_spec = variables.Variable.SaveSliceInfo.from_spec(
+        save_slice_info.spec)
+
+    self.assertEqual(save_slice_info.spec, save_slice_info_from_spec.spec)
+
+  @parameterized.parameters(
+      dict(spec="0", error_message="contain space-separated full_shape info"),
+      dict(spec="0:0", error_message="contain space-separated full_shape info"),
+      dict(spec="a b", error_message="full_shape must be a sequence of int"),
+      dict(spec="0 0:0", error_message="comma-separated pairs of offsets and"),
+      dict(spec="0 a,0:0:0", error_message="var_offset must be an integer"),
+      dict(spec="0 0,a:0:0", error_message="var_shape must be an integer"))
+  def testSaveSliceInfoFromSpecFails(self, spec, error_message):
+    with self.assertRaisesRegex(ValueError, error_message):
+      variables.Variable.SaveSliceInfo.from_spec(spec)
 
 
 class IsInitializedTest(test.TestCase):

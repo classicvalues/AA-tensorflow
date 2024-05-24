@@ -1,4 +1,4 @@
-/* Copyright 2023 The TensorFlow Authors. All Rights Reserved.
+/* Copyright 2024 The TensorFlow Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,9 +33,6 @@ def FloatElementsAttr : ElementsAttrBase<
   CPred<"$_self.isa<ElementsAttr>() && $_self.cast<ElementsAttr>().getShapedType().getElementType().isa<FloatType>()">,
         "float constant tensor">;
 
-// Checks if the param passed is of NoneType.
-def IsNoneType : Constraint<CPred<"$0.getType().isa<NoneType>()">>;
-
 def ExtractSingleElementAsFloat : NativeCodeCall<
     "ExtractSingleElementAsFloat($_self.cast<ElementsAttr>())">;
 
@@ -43,11 +40,6 @@ def ExtractSingleElementAsFloat : NativeCodeCall<
 class HasRankAtMost<int n> : Constraint<
     CPred<"$0.getType().cast<ShapedType>().hasRank() && "
           "$0.getType().cast<ShapedType>().getRank() <= " # n>>;
-
-// Checks if the value has rank at most 'n'.
-class HasRankAtLeast<int n> : Constraint<
-    CPred<"$0.getType().cast<ShapedType>().hasRank() && "
-          "$0.getType().cast<ShapedType>().getRank() >= " # n>>;
 
 // Checks if the value has rank 'n'.
 class HasRank<int n> : Constraint<
@@ -57,6 +49,8 @@ class HasRank<int n> : Constraint<
 class FloatValueEquals<string val> : Constraint<CPred<
   "FloatValueEquals($0, " # val # ")">>;
 
+class IsBoolAttrEqual<string true_or_false> : Constraint<CPred<
+  "$0.getValue() == "#true_or_false#"">>;
 
 // Flattens a constant tensor to 1D.
 def FlattenTo1D : NativeCodeCall<"FlattenTo1D($0)">;
@@ -69,6 +63,16 @@ def HasSameStaticShapes : Constraint<
           "$0.getType().cast<ShapedType>().getShape() =="
           "$1.getType().cast<ShapedType>().getShape()">,
     "have the same static shape">;
+
+def IsPermutationNCHW : Constraint<CPred<"IsPermutationNCHW($0)">>;
+
+def IsBiasShape : Constraint<
+    CPred<"$0.getType().cast<ShapedType>().getRank() == 4 && "
+          "$0.getType().cast<ShapedType>().getShape()[2] == 1 && "
+          "$0.getType().cast<ShapedType>().getShape()[3] == 1">,
+    "has shape consistent with a bias">;
+
+def ReshapeNCHWBiasToNHWC : NativeCodeCall<"ReshapeNCHWBiasToNHWC($0, $1)">;
 
 //===----------------------------------------------------------------------===//
 // Ternary ops patterns.
@@ -362,6 +366,15 @@ class ConstDoubleValueLessThan<string n> : Constraint<
   "std::abs(*$0.cast<DenseElementsAttr>().getValues<float>().begin()) < "
   # n>>;
 
+// Constraint that the attribute value is negative infinity or negative largest.
+// We use both -inf & flt_min due to the forward compatibility.
+def ConstAPFloatNegLargestOrNegInfinity : Constraint<CPred<
+  "$0.isa<DenseElementsAttr>() && "
+  "$0.cast<DenseElementsAttr>().getNumElements() == 1 && "
+  "(($0.cast<DenseElementsAttr>().getValues<APFloat>()[0].isLargest() && "
+  "$0.cast<DenseElementsAttr>().getValues<APFloat>()[0].isNegative()) || "
+  "$0.cast<DenseElementsAttr>().getValues<APFloat>()[0].isNegInfinity())">>;
+
 def L2NormValidReduceIndex : Constraint<CPred<
   "L2NormalizeReduceAxis($0, $1.cast<DenseElementsAttr>())">>;
 
@@ -449,6 +462,9 @@ def IsLastDimEqualToNumElements : Constraint<CPred<
 
 def IsDefinedByFullyConnectedOp : Constraint<CPred<
   "$0.getDefiningOp<TFL::FullyConnectedOp>() != nullptr">>;
+
+def IsDefinedByConv2DOp : Constraint<CPred<
+  "$0.getDefiningOp<TFL::Conv2DOp>() != nullptr">>;
 
 // Returns true if the supplied value-
 // 1) Has only one use or
@@ -696,14 +712,10 @@ foreach ValueOp = [TFL_CeilOp, TFL_ExpOp, TFL_FloorOp, TFL_NegOp,
   }
 }
 
-// Returns shape of a ranked tensor.
-// if called without a ranked tensor it will fail.
-def GetShape: NativeCodeCall<"GetShape($0)">;
-
 // Returns truncated shape of a ranked-tensor.
-// Truncated, here, means eliminating any contiguous 1s' in the lower
+// Prefix-Truncated, here, means eliminating any contiguous 1s' in the lower
 // dimentions of the tensor
-def GetTruncatedShape: NativeCodeCall<"GetShape($0, true)">;
+def GetPrefixTruncatedShape: NativeCodeCall<"GetShape($0, true)">;
 
 // Returns True if the operand type is RankedTensorType and valid.
 def HasValidRankedTensor : Constraint<CPred<
@@ -711,7 +723,7 @@ def HasValidRankedTensor : Constraint<CPred<
   "$0.getType().cast<RankedTensorType>().getNumDynamicDims() <= 1">>;
 
 // Check if the truncated shape of the lhs is equal to the shape of rhs
-def IsTruncatedShapeEqualTo : Constraint<CPred<
+def IsPrefixTruncatedShapeEqualTo : Constraint<CPred<
   "GetShape($0, true) == GetShape($1)">>;
 
 def ConvertSqueezeToReshape : Pat<
@@ -733,13 +745,48 @@ def ConvertTrasposeReshapeTransposeToReshape : Pat<
       (TFL_TransposeOp:$first_transpose $input, $permutation2),
         $shape),
       $permutation1),
-  (TFL_ReshapeOp $input, (Arith_ConstantOp (GetTruncatedShape $input))),
-  [(IsTruncatedShapeEqualTo $first_transpose, $middle_reshape),
-   (IsTruncatedShapeEqualTo $input, $second_transpose)]>;
+  (TFL_ReshapeOp $input, (Arith_ConstantOp (GetPrefixTruncatedShape $input))),
+  [(IsPrefixTruncatedShapeEqualTo $first_transpose, $middle_reshape),
+   (IsPrefixTruncatedShapeEqualTo $input, $second_transpose)]>;
 
-// Function to map final permutation to initial permutation
-// initial -> permutation1 -> permutation2 -> final
-def RemapPermutation: NativeCodeCall<"RemapPermutation($0, $1)">;
+class AllUsersAreAddOpsAndCanFuseWith<string op_to_fuse_with> : Constraint<CPred<
+  "llvm::all_of($0.getUsers(), [&](Operation *user) {"
+  "  if(!llvm::isa<TFL::AddOp>(user)) return false;"
+  "  if(!user->getOperand(0).getDefiningOp<"#op_to_fuse_with#">()) return false;"
+  "  return true;"
+  "})">, "all users are AddOp and can fuse with "#op_to_fuse_with#"">;
+
+// TODO(b/294385379): This pattern only appears when we convert
+// from shlo due to differences in broadcasting behavior
+def UndoBroadcastFullyConnectedBiasAdd : Pat<
+  (TFL_AddOp $lhs, (Arith_ConstantOp:$const_value $bias), TFL_AF_None),
+  (TFL_AddOp $lhs, (Arith_ConstantOp (FlattenTo1D $bias)), TFL_AF_None),
+  [(AnyStaticShapeTensor $lhs),
+   (IsLastDimEqualToNumElements $bias, $bias),
+   (HasRankAtMost<4> $bias),
+   (HasRankAtLeast<2> $bias),
+   (IsDefinedByFullyConnectedOp $lhs),
+   (AllUsersAreAddOpsAndCanFuseWith<"TFL::FullyConnectedOp"> $const_value)]>;
+
+// TODO(b/294385379): This pattern only appears when we convert
+// from shlo due to differences in broadcasting behavior.
+def UndoBroadcastConvBiasAdd : Pat<
+  (TFL_AddOp $lhs, (Arith_ConstantOp:$const_op $bias), TFL_AF_None),
+  (TFL_AddOp $lhs, (Arith_ConstantOp (FlattenTo1D $bias)), TFL_AF_None),
+  [(AnyStaticShapeTensor $lhs),
+   (IsLastDimEqualToNumElements $bias, $bias),
+   (HasOneUse $const_op),
+   (HasRankAtMost<4> $bias),
+   (HasRankAtLeast<2> $bias),
+   (IsDefinedByConv2DOp $lhs)]>;
+
+// Pattern to convert a trivial transpose op to a reshape op.
+def ConvertTrivialTransposeOpToReshapeOp : Pat<
+  (TFL_TransposeOp:$transpose_op $input, (Arith_ConstantOp:$permutation $p1)),
+  (TFL_ReshapeOp $input, (Arith_ConstantOp (GetShape $transpose_op))),
+  [(IsTransposeTrivial $input, $permutation),
+   (AnyStaticShapeTensor $input),
+   (AnyStaticShapeTensor $transpose_op)]>;
 
 // Pattern to fuse redundant tanspose op
 def FoldDoubleTranspose : Pat<
@@ -979,6 +1026,30 @@ def FoldNormalizationIntoSoftmax : Pat<
    (HasOneUse $sub),
    (HasOneUse $max)]>;
 
+// Convert softmax(x-reshape(maximum(max(x), -inf))) into softmax(x) as the softmax op already deals
+// with the max normalization. This comes from upstream Jax (https://github.com/google/jax/pull/15677)
+def FoldNormalizationIntoSoftmaxJaxWithAxisMinus1 : Pat<
+  (TFL_SoftmaxOp
+    (TFL_SubOp:$sub $input,
+    (TFL_ReshapeOp:$reshape
+      (TFL_MaximumOp:$maximum
+        (TFL_ReduceMaxOp:$max $max_input, (Arith_ConstantOp I32ElementsAttr: $axes),
+                              ConstBoolAttrFalse),
+        (Arith_ConstantOp F32ElementsAttr: $threshold)
+      ),
+      (Arith_ConstantOp I32ElementsAttr: $shape)
+    ),
+    TFL_AF_None),
+    $beta),
+  (TFL_SoftmaxOp $input, $beta),
+  [(IsSame $input, $max_input),
+   (AxesIsLastDimension $axes, $max_input),
+   (ConstAPFloatNegLargestOrNegInfinity $threshold),
+   (HasOneUse $maximum),
+   (HasOneUse $reshape),
+   (HasOneUse $sub),
+   (HasOneUse $max)]>;
+
 def HaveSameType : Constraint<CPred<"($0.getType() == $1.getType())">>;
 
 class AllElementsAreF32<string val> : Constraint<CPred<
@@ -1070,7 +1141,7 @@ foreach ReduceOp = [TFL_ReduceAnyOp, TFL_ReduceAllOp,
                     TFL_ReduceMinOp, TFL_ReduceMaxOp,
                     TFL_MeanOp, TFL_SumOp, TFL_ReduceProdOp] in {
   def EliminateNoOpReductionOp#ReduceOp : Pat<
-    (ReduceOp:$output $input, $index, $keep_dims),
+    (ReduceOp:$output $input, (Arith_ConstantOp $index), $keep_dims),
     (replaceWithValue $input),
     [(IsTailOfShape $input, $output),
      (IsTailOfShape $output, $input)]>;
@@ -1101,6 +1172,26 @@ def OptimizeSliceOp : Pat<
   (TFL_SliceOp:$output $input, (Arith_ConstantOp $begin), (Arith_ConstantOp $size)),
   (replaceWithValue $input),
   [(CanOptimizeIdentitySliceOp $input, $begin, $size)]>;
+
+// Convert the StridedSliceOp to a SliceOp when possible. This will enable other
+// optimizations on SliceOp to run.
+def OptimizeStridedSlice : Pat<
+  (TFL_StridedSliceOp $input,
+    (Arith_ConstantOp $begin),
+    (Arith_ConstantOp $end),
+    (Arith_ConstantOp $stride),
+    ZeroIntAttr:$_,
+    ZeroIntAttr:$_,
+    ZeroIntAttr:$_,
+    ZeroIntAttr:$_,
+    ZeroIntAttr:$_,
+    ConstBoolAttrFalse),
+  (TFL_SliceOp $input,
+    (Arith_ConstantOp $begin),
+    (Arith_ConstantOp (GetOffSet $begin, $end))),
+  [(IsAllOnesConstant $stride),
+   (HasNonNegativeValues $begin),
+   (HasNonNegativeOffset $begin, $end)]>;
 
 def GetNumElementsOrOne: NativeCodeCall<"GetNumElementsOrOne($0.getType())">;
 
@@ -1430,3 +1521,113 @@ def FuseLeakyReluConst : Pat<
     (HasOneUse $geq_out),
     (HasOneUse $mul_out),
   ]>;
+
+// Return true if the product of dimension values of a subsection of the tensor
+// is equal to the non-contracting dimension after a reshape
+class BroadcastDimsProductEqual<int agg_start_idx> : Constraint<CPred<
+  "TFL::BroadcastDimsProductEqual($0, $1, "# agg_start_idx #")">>;
+
+// Returns true if the dimensions of a subsection of two tensors is equal
+class AreTensorSubSectionShapesEqual<int skip_first, int skip_last> : Constraint<CPred<
+  "($0.getType().dyn_cast<ShapedType>().getShape()"
+    ".drop_back("#skip_last#").drop_front("#skip_first#") =="
+  "$1.getType().dyn_cast<ShapedType>().getShape()"
+    ".drop_back("#skip_last#").drop_front("#skip_first#"))">>;
+
+// Returns true if the broadcast dimension of a tensor is [1]
+// here- broadcast dimension is first prefix dimension
+// excluding the last two dimensions
+def IsBroadcastDimEqualToOne : Constraint<CPred<
+  "$0.getType().dyn_cast<ShapedType>().getShape()[0] == 1">>;
+
+// Pattern to fuse/fold the reshape ops around TFL_BatchMatMulOp
+// This pattern is applied when the rank of rhs is 2
+// which means it has empty broadcast dimensions
+def FuseReshapesAroundBatchMatMulLHS: Pat<
+  (TFL_ReshapeOp:$final_shape_change
+    (TFL_BatchMatMulOp:$bmm_tmp_output
+      (TFL_ReshapeOp:$initial_shape_change $input, (Arith_ConstantOp $s0)),
+      $rhs, $adj_x, $adj_y, $bool_attr),
+    (Arith_ConstantOp $s1)),
+  (TFL_BatchMatMulOp $input, $rhs, $adj_x, $adj_y, $bool_attr),
+  [(HasRank<2> $rhs),
+   (HasRank<2> $initial_shape_change),
+   (BroadcastDimsProductEqual<0> $input, $initial_shape_change),
+   (BroadcastDimsProductEqual<0> $final_shape_change, $bmm_tmp_output),
+   (AreTensorSubSectionShapesEqual<0, 1> $input, $final_shape_change)]>;
+
+// Pattern to fuse/fold the reshape ops around TFL_BatchMatMulOp
+// This pattern is applied when the rank of rhs is 3
+// and the broadcast dimension is [1]
+def FuseReshapesAroundBatchMatMulLHS1: Pat<
+  (TFL_ReshapeOp:$final_shape_change
+    (TFL_BatchMatMulOp:$bmm_tmp_output
+      (TFL_ReshapeOp:$initial_shape_change $input, (Arith_ConstantOp $s0)),
+      $rhs, $adj_x, $adj_y, $bool_attr),
+    (Arith_ConstantOp $s1)),
+  (TFL_BatchMatMulOp $input, $rhs, $adj_x, $adj_y, $bool_attr),
+  [(HasRankAtLeast<3> $input),
+   (HasRank<3> $rhs),
+   (HasRank<3> $initial_shape_change),
+   (IsBroadcastDimEqualToOne $rhs),
+   (IsBroadcastDimEqualToOne $input),
+   (BroadcastDimsProductEqual<1> $input, $initial_shape_change),
+   (BroadcastDimsProductEqual<1> $final_shape_change, $bmm_tmp_output),
+   (AreTensorSubSectionShapesEqual<1, 1> $input, $final_shape_change)]>;
+
+
+
+// Fuse redundant TFL_TransposeOp into TFL_BatchMatMulOp
+def FuseTransposeIntoBatchMatMulLHS: Pat<
+  (TFL_BatchMatMulOp
+    (TFL_TransposeOp:$transposed_value $input, (Arith_ConstantOp:$perm_value $p0)),
+    $rhs, $adj_x, $adj_y, $asymmetric_quantize_inputs),
+  (TFL_BatchMatMulOp $input, $rhs, ConstBoolAttrTrue, $adj_y, $asymmetric_quantize_inputs),
+  [(AreLastTwoDimsTransposed $perm_value),
+   (IsBoolAttrEqual<"false"> $adj_x)]>;
+
+// Fuses TFL_TransposeOp after TFL_BatchMatMulOp into the BMM.
+def FuseTransposeAfterBatchMatmul : Pat<
+  (TFL_TransposeOp
+    (TFL_BatchMatMulOp $lhs, $rhs, ConstBoolAttrFalse, ConstBoolAttrTrue,
+                       $asymmetric_quantize_inputs
+    ),
+    (Arith_ConstantOp:$perm_value $p0)
+  ),
+  (TFL_BatchMatMulOp $rhs, $lhs, ConstBoolAttrFalse, ConstBoolAttrTrue,
+                     $asymmetric_quantize_inputs
+  ),
+  [(AreLastTwoDimsTransposed $perm_value)]>;
+
+// Fuse redundant RHS TFL_TransposeOp into TFL_BatchMatMulOp if rhs is constant
+// tensor of rank-2.
+def FuseTransposeIntoBatchMatMulRHS: Pat<
+  (TFL_BatchMatMulOp $lhs,
+    (TFL_TransposeOp (TFL_QConstOp:$input $_, $_), (Arith_ConstantOp:$perm_value $p0)),
+    $adj_x, $adj_y, $asymmetric_quantize_inputs),
+  (TFL_FullyConnectedOp
+    $lhs,
+    $input, (CreateNoneValue $lhs), TFL_AF_None, TFL_FCWO_Default,
+    ConstBoolAttrTrue, $asymmetric_quantize_inputs),
+  [(HasRank<2> $input),
+   (AreLastTwoDimsTransposed $perm_value),
+   (IsBoolAttrEqual<"false"> $adj_y)]>;
+
+// Replace conv-->transpose-->add with conv-->add-->transpose
+// The bias needs only reshape (i.e. ReshapeNCHWBiasToNHWC) and not transpose
+// because the bias's shape simply changes from NxCx1x1 to Nx1x1xC.
+def ReorderNCHWTransposeAdd : Pat <
+  (TFL_AddOp:$add_op
+    (TFL_TransposeOp:$transpose_op $input, $perm),
+    (Arith_ConstantOp:$bias_op FloatElementsAttr:$bias),
+    $act_fn),
+  (TFL_TransposeOp
+    (TFL_AddOp $input,
+      (Arith_ConstantOp (ReshapeNCHWBiasToNHWC $bias_op, $bias)),
+      $act_fn),
+    $perm),
+  [(IsPermutationNCHW $perm),
+  (IsBiasShape $bias_op),
+  (IsDefinedByConv2DOp $input),
+  (HasOneUse $add_op),
+  (HasOneUse $transpose_op)]>;

@@ -29,8 +29,8 @@ from tensorflow.python.framework import func_graph
 from tensorflow.python.framework import importer
 from tensorflow.python.framework import ops
 from tensorflow.python.framework import sparse_tensor
+from tensorflow.python.framework import tensor as tensor_lib
 from tensorflow.python.framework import tensor_shape
-from tensorflow.python.framework import tensor_spec
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import resource_variable_ops
 from tensorflow.python.ops import variable_scope
@@ -224,7 +224,7 @@ class WrappedFunction(function.ConcreteFunction):
     _lift_unlifted_variables(fn_graph, variable_holder)
     # We call __init__ after lifting variables so that the function's signature
     # properly reflects the new captured inputs.
-    for f in fn_graph.as_graph_def().library.function:
+    for f in fn_graph.as_graph_def(use_pybind11_proto=True).library.function:
       context.context().add_function_def(f)
     self._signature = signature
     function_type = function_type_lib.from_structured_signature(
@@ -246,7 +246,7 @@ class WrappedFunction(function.ConcreteFunction):
       if self._signature is not None:
         args = list(args)
         for i, arg in enumerate(args):
-          if isinstance(self._signature[i], tensor_spec.DenseSpec):
+          if isinstance(self._signature[i], tensor_lib.DenseSpec):
             args[i] = ops.convert_to_tensor(arg, self._signature[i].dtype)
       return self._call_flat(args, self.captured_inputs)
     else:
@@ -281,9 +281,11 @@ class WrappedFunction(function.ConcreteFunction):
     flat_feeds = nest.flatten(feeds, expand_composites=True)
     flat_feeds = [self.graph.as_graph_element(t) for t in flat_feeds]
     for f in flat_feeds:
-      if not isinstance(f, ops.Tensor):
-        raise ValueError("All memebers of argument `feeds` must be tensors. "
-                         f"Got {f} with type {type(f)}.")
+      if not isinstance(f, tensor_lib.Tensor):
+        raise ValueError(
+            "All members of argument `feeds` must be tensors. "
+            f"Got {f} with type {type(f)}."
+        )
 
     # Ignoring all feeds that are captures allows prune to be called
     # using wrapped_func.inputs even when it uses variables
@@ -319,7 +321,8 @@ class WrappedFunction(function.ConcreteFunction):
         else:
           operation_fetches.append(decoded)
         return decoded
-      elif isinstance(fetch, (ops.Tensor, composite_tensor.CompositeTensor)):
+      elif isinstance(
+          fetch, (tensor_lib.Tensor, composite_tensor.CompositeTensor)):
         tensor_fetches.append(fetch)
         return fetch
       else:

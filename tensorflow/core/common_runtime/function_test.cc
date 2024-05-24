@@ -179,7 +179,7 @@ class FunctionLibraryRuntimeTest : public ::testing::Test {
                                tsl::core::RefCountPtr<Rendezvous>* r) {
           *r = tsl::core::RefCountPtr<Rendezvous>(
               new IntraProcessRendezvous(device_mgr));
-          return OkStatus();
+          return absl::OkStatus();
         }}));
     flr0_ = pflr_->GetFLR("/job:localhost/replica:0/task:0/cpu:0");
     flr1_ = pflr_->GetFLR("/job:localhost/replica:0/task:0/cpu:1");
@@ -210,7 +210,7 @@ class FunctionLibraryRuntimeTest : public ::testing::Test {
     for (size_t i = 0; i < rets.size(); ++i) {
       *rets[i] = out[i];
     }
-    return OkStatus();
+    return absl::OkStatus();
   }
 
   Status Instantiate(FunctionLibraryRuntime* flr, const string& name,
@@ -280,7 +280,7 @@ class FunctionLibraryRuntimeTest : public ::testing::Test {
       return status;
     }
 
-    return OkStatus();
+    return absl::OkStatus();
   }
 
   Status InstantiateAndRunViaCallFrameInterface(FunctionLibraryRuntime* flr,
@@ -449,7 +449,7 @@ class ConsumeArgumentCallFrame : public CallFrameInterface {
   Status SetRetval(int index, const Tensor& val) override {
     CHECK_EQ(index, 0);
     *retval_ = val;
-    return OkStatus();
+    return absl::OkStatus();
   }
 
  private:
@@ -635,7 +635,7 @@ TEST_F(FunctionLibraryRuntimeTest, StateHandle) {
       // Attrs
       {},
       // Nodes
-      {FDH::Const<int32>("shape", gtl::ArraySlice<int32>({1})),
+      {FDH::Const<int32>("shape", absl::Span<const int32>({1})),
        FDH::Const<int32>("minval", 0),
        FDH::Const<int32>("maxval", 10),
        // A stateful node.
@@ -1128,7 +1128,7 @@ TEST_F(FunctionLibraryRuntimeTest, ExpandInlineFunctionsAndKeepCallerNode) {
     auto a = ops::_Arg(s.WithOpName("a"), DT_FLOAT, 0);
     auto b = test::function::Call(&s, "b", "AddAndMul", {a});
     TF_RETURN_IF_ERROR(s.ToGraph(g->get()));
-    return OkStatus();
+    return absl::OkStatus();
   };
 
   const string input_node = "Func/b/input/_0";
@@ -1216,7 +1216,7 @@ TEST_F(FunctionLibraryRuntimeTest, ExpandInlineFunctionsAndPlaceInlinedNodes) {
     for (Node* node : (*g)->op_nodes()) {
       if (node->name() == "b") node->set_requested_device(call_device);
     }
-    return OkStatus();
+    return absl::OkStatus();
   };
 
   const string input_node = "Func/b/input/_0";
@@ -2450,132 +2450,6 @@ TEST(OptimizationTest, RemoveListArrayConverter_WithControlDeps) {
   // NOTE: We are not removing Identity nodes with any control
   // dependencies yet.
   TF_EXPECT_GRAPH_EQ(expected, Optimize(remove_listarray_and_identity, func));
-}
-
-class TestStackTrace : public AbstractStackTrace {
- public:
-  explicit TestStackTrace(const std::vector<StackFrame>& frames)
-      : frames_(frames) {}
-
-  absl::Span<StackFrame const> ToFrames() const override { return frames_; }
-
-  StackFrame LastUserFrame() const override { return frames_.back(); }
-
-  std::vector<StackFrame> GetUserFrames(int limit) const override {
-    return frames_;
-  }
-
-  string ToString(const TracePrintingOptions& opts) const override {
-    return "";
-  }
-
-  std::vector<StackFrame> frames_;
-};
-
-TEST(StackTracesMapToGraphDebugInfoTest, EmptyMap) {
-  StackTracesMap map;
-  GraphDebugInfo generated = StackTracesMapToGraphDebugInfo(map);
-
-  EXPECT_EQ(generated.files_size(), 0);
-  EXPECT_EQ(generated.traces_size(), 0);
-}
-
-TEST(StackTracesMapToGraphDebugInfoTest, EmptyFrames) {
-  StackTracesMap map;
-  std::vector<StackFrame> frames;
-  auto stack_trace = std::make_shared<TestStackTrace>(frames);
-  map.insert({"dummy_name", stack_trace});
-  GraphDebugInfo generated = StackTracesMapToGraphDebugInfo(map);
-
-  EXPECT_EQ(generated.files_size(), 0);
-  EXPECT_EQ(generated.traces_size(), 1);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols().size(), 0);
-}
-
-TEST(StackTracesMapToGraphDebugInfoTest, OneFrame) {
-  StackTracesMap map;
-  std::vector<StackFrame> frames = {
-      StackFrame({"dummy_file_name", 10, "dummy_function_name"})};
-  auto stack_trace = std::make_shared<TestStackTrace>(frames);
-  map.insert({"dummy_name", stack_trace});
-  GraphDebugInfo generated = StackTracesMapToGraphDebugInfo(map);
-
-  EXPECT_EQ(generated.files_size(), 1);
-  EXPECT_EQ(generated.files()[0], "dummy_file_name");
-
-  EXPECT_EQ(generated.traces_size(), 1);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols().size(), 1);
-  EXPECT_EQ(
-      generated.traces().at("dummy_name").file_line_cols()[0].file_index(), 0);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[0].line(), 10);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[0].func(),
-            "dummy_function_name");
-}
-
-TEST(StackTracesMapToGraphDebugInfoTest, TwoFramesSameFile) {
-  StackTracesMap map;
-  std::vector<StackFrame> frames = {
-      StackFrame({"dummy_file_name", 10, "dummy_function_name"}),
-      StackFrame({"dummy_file_name", 20, "other_function_name"})};
-  auto stack_trace = std::make_shared<TestStackTrace>(frames);
-  map.insert({"dummy_name", stack_trace});
-  GraphDebugInfo generated = StackTracesMapToGraphDebugInfo(map);
-
-  EXPECT_EQ(generated.files_size(), 1);
-  EXPECT_EQ(generated.files()[0], "dummy_file_name");
-
-  EXPECT_EQ(generated.traces_size(), 1);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols().size(), 2);
-
-  EXPECT_EQ(
-      generated.traces().at("dummy_name").file_line_cols()[0].file_index(), 0);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[0].line(), 10);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[0].func(),
-            "dummy_function_name");
-
-  EXPECT_EQ(
-      generated.traces().at("dummy_name").file_line_cols()[1].file_index(), 0);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[1].line(), 20);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[1].func(),
-            "other_function_name");
-}
-
-TEST(StackTracesMapToGraphDebugInfoTest, TwoFramesDifferentFile) {
-  StackTracesMap map;
-  std::vector<StackFrame> frames = {
-      StackFrame({"dummy_file_name", 10, "dummy_function_name"}),
-      StackFrame({"other_file_name", 20, "other_function_name"})};
-  auto stack_trace = std::make_shared<TestStackTrace>(frames);
-  map.insert({"dummy_name", stack_trace});
-  GraphDebugInfo generated = StackTracesMapToGraphDebugInfo(map);
-
-  EXPECT_EQ(generated.files_size(), 2);
-  EXPECT_EQ(generated.files()[0], "dummy_file_name");
-  EXPECT_EQ(generated.files()[1], "other_file_name");
-
-  EXPECT_EQ(generated.traces_size(), 1);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols().size(), 2);
-
-  EXPECT_EQ(
-      generated.traces().at("dummy_name").file_line_cols()[0].file_index(), 0);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[0].line(), 10);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[0].func(),
-            "dummy_function_name");
-
-  EXPECT_EQ(
-      generated.traces().at("dummy_name").file_line_cols()[1].file_index(), 1);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[1].line(), 20);
-  EXPECT_EQ(generated.traces().at("dummy_name").file_line_cols()[1].func(),
-            "other_function_name");
-}
-
-TEST(StackTracesTest, ToFrames) {
-  StackTracesMap map;
-  std::vector<StackFrame> frames = {
-      StackFrame({"dummy_file_name", 10, "dummy_function_name"}),
-      StackFrame({"other_file_name", 20, "other_function_name"})};
-  auto stack_trace = TestStackTrace(frames);
-  EXPECT_EQ(stack_trace.ToFrames().size(), 2);
 }
 
 }  // namespace

@@ -37,6 +37,7 @@ limitations under the License.
 #include "mlir/IR/Attributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinOps.h"  // from @llvm-project
 #include "mlir/IR/Dialect.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Tools/mlir-translate/Translation.h"  // from @llvm-project
 #include "stablehlo/dialect/StablehloOps.h"  // from @stablehlo
@@ -45,14 +46,14 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/tensorflow/translate/mlir_roundtrip_flags.h"
 #include "tensorflow/compiler/mlir/tensorflow/translate/tf_mlir_translate_cl.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/serialize_mlir_module_utils.h"
-#include "tensorflow/compiler/mlir/tf2xla/api/v0/compile_mlir_util.h"
+#include "tensorflow/compiler/mlir/tf2xla/api/v1/compile_mlir_util.h"
 #include "tensorflow/compiler/mlir/utils/string_container_utils.h"
 #include "tensorflow/compiler/tf2xla/xla_argument.h"
 #include "tensorflow/compiler/tf2xla/xla_helpers.h"
-#include "tensorflow/compiler/xla/hlo/ir/hlo_module.h"
-#include "tensorflow/compiler/xla/service/hlo.pb.h"
-#include "tensorflow/compiler/xla/service/hlo_module_config.h"
-#include "tensorflow/compiler/xla/translate/mhlo_to_hlo/type_to_shape.h"
+#include "xla/hlo/ir/hlo_module.h"
+#include "xla/service/hlo.pb.h"
+#include "xla/service/hlo_module_config.h"
+#include "xla/translate/mhlo_to_hlo/type_to_shape.h"
 #include "tensorflow/core/framework/tensor_shape.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/framework/types.pb.h"
@@ -151,7 +152,7 @@ Status ParseArgumentShapes(
         *shape.value(), &arg_shapes[shape.index()].shape));
   }
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status ParseDataTypes(absl::string_view data_types_str,
@@ -174,14 +175,14 @@ Status ParseDataTypes(absl::string_view data_types_str,
                                      data_type.value());
   }
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status ParseArgumentKinds(
     absl::string_view input_types_str,
     llvm::SmallVectorImpl<XlaArgument::Kind>& argument_kinds) {
   argument_kinds.clear();
-  if (input_types_str.empty()) return OkStatus();
+  if (input_types_str.empty()) return absl::OkStatus();
 
   std::vector<absl::string_view> argument_kind_strs =
       absl::StrSplit(input_types_str, ',');
@@ -199,7 +200,7 @@ Status ParseArgumentKinds(
     }
   }
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status ParseXlaArguments(absl::string_view input_shapes_str,
@@ -248,7 +249,7 @@ Status ParseXlaArguments(absl::string_view input_shapes_str,
     arg.kind = std::get<3>(arg_components);
   }
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 }  // anonymous namespace
@@ -328,15 +329,17 @@ static mlir::LogicalResult MlirTfToHloTextTranslateFunctionImpl(
       custom_legalization_passes{};
   XlaCompilationResult compilation_result;
   auto compilation_status =
-      via_builder ? CompileMlirToXlaHloViaBuilder(
-                        module_op, arg_shapes, device_type, &compilation_result,
-                        custom_legalization_passes)
-                  : CompileMlirToXlaHlo(
-                        module_op, arg_shapes, device_type, emit_use_tuple_arg,
-                        /*analyse_graph=*/false, emit_return_tuple,
-                        /*use_resource_updates_for_aliases=*/true,
-                        /*shape_determination_fns=*/{}, &compilation_result,
-                        custom_legalization_passes);
+      via_builder
+          ? CompileMlirToXlaHloViaBuilder(module_op, arg_shapes, device_type,
+                                          &compilation_result,
+                                          custom_legalization_passes)
+          : CompileMlirToXlaHlo(module_op, arg_shapes, device_type,
+                                emit_use_tuple_arg,
+                                /*analyse_graph=*/false, emit_return_tuple,
+                                /*use_resource_updates_for_aliases=*/true,
+                                /*shape_determination_fns=*/{},
+                                &compilation_result, custom_legalization_passes)
+                .status();
   if (!compilation_status.ok()) {
     LOG(ERROR) << "TF/XLA compilation failed: " << compilation_status;
     return mlir::failure();
@@ -394,11 +397,11 @@ SerializedMlirStringAttrToMlirModuleTranslate(llvm::StringRef input,
   // an output parameter is provided for returning the number of chars read.
   size_t numRead;
   mlir::Attribute attr = mlir::parseAttribute(input, context, {}, &numRead);
-  if (!attr || !attr.isa<mlir::StringAttr>()) {
+  if (!attr || !mlir::isa<mlir::StringAttr>(attr)) {
     LOG(ERROR) << "Input is not parsable as a MLIR StringAttr.";
     return nullptr;
   }
-  auto str_attr = attr.cast<mlir::StringAttr>();
+  auto str_attr = mlir::cast<mlir::StringAttr>(attr);
 
   mlir::DialectRegistry registry;
   RegisterMlirInputDialects(registry);

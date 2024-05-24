@@ -1,6 +1,8 @@
-load("//tensorflow:strict.default.bzl", "py_strict_test")
-load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable", "if_portable", "pybind_extension")
 load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+load("//tensorflow:strict.default.bzl", "py_strict_test")
+
+# Placeholder: load py_proto_library
+load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable", "if_portable", "pybind_extension")
 load(
     "//tensorflow/core/platform:build_config.bzl",
     "tf_proto_library",
@@ -36,7 +38,14 @@ pybind_extension(
     srcs = ["wrapper/metrics_wrapper_pybind11.cc"],
     hdrs = ["wrapper/metrics_wrapper.h"],
     compatible_with = get_compatible_with_portable(),
-    visibility = ["//visibility:private"],
+    enable_stub_generation = True,
+    pytype_srcs = [
+        "_pywrap_tensorflow_lite_metrics_wrapper.pyi",
+    ],
+    visibility = [
+        "__subpackages__",
+        "//tensorflow/tools/pip_package:__subpackages__",
+    ],
     deps = [
         ":metrics_wrapper_lib",
         "//tensorflow/python/lib/core:pybind11_lib",
@@ -64,6 +73,7 @@ py_strict_test(
     srcs_version = "PY3",
     deps = [
         ":metrics_wrapper",
+        #internal proto upb dep
         "//tensorflow:tensorflow_py",
         "//tensorflow/lite/python:convert",
         "//tensorflow/lite/python:lite",
@@ -126,6 +136,9 @@ py_strict_test(
     deps = [
         ":converter_error_data_proto_py",
         ":metrics",
+        "@absl_py//absl/testing:parameterized",
+        #internal proto upb dep
+        "//third_party/py/numpy",
         "//tensorflow:tensorflow_py",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/lite/python:convert",
@@ -133,9 +146,9 @@ py_strict_test(
         "//tensorflow/python/client:session",
         "//tensorflow/python/eager:context",
         "//tensorflow/python/eager:monitoring",
-        "//tensorflow/python/framework",
         "//tensorflow/python/framework:convert_to_constants",
         "//tensorflow/python/framework:dtypes",
+        "//tensorflow/python/framework:importer",
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/framework:test_lib",
         "//tensorflow/python/ops:array_ops",
@@ -147,8 +160,6 @@ py_strict_test(
         "//tensorflow/python/platform:resource_loader",
         "//tensorflow/python/saved_model",
         "//tensorflow/python/trackable:autotrackable",
-        "//third_party/py/numpy",
-        "@absl_py//absl/testing:parameterized",
     ],
 )
 

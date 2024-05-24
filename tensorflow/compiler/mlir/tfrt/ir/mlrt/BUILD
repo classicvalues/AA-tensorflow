@@ -13,10 +13,7 @@ td_library(
     ],
     includes = ["."],
     visibility = [
-        # copybara:uncomment "//learning/brain/experimental/tfrt:__subpackages__",
-        "//learning/infra/mira/distributed:__subpackages__",
-        "//tensorflow/compiler/mlir/tfrt:__subpackages__",
-        "//tensorflow/core/tfrt/mlrt:__subpackages__",
+        # copybara:uncomment "//learning/brain/tfrt/mlir:__subpackages__",
     ],
     deps = [
         "@llvm-project//mlir:OpBaseTdFiles",
@@ -52,14 +49,15 @@ cc_library(
         "mlrt_ops.h",
     ],
     visibility = [
-        # copybara:uncomment "//learning/brain/experimental/tfrt:__subpackages__",
-        "//learning/infra/mira/distributed:__subpackages__",
+        # copybara:uncomment "//learning/brain/tfrt/mlir:__subpackages__",
         "//tensorflow/compiler/mlir/tfrt:__subpackages__",
     ],
     deps = [
         ":mlrt_ops_inc_gen",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:InliningUtils",
+        "@llvm-project//mlir:Support",
     ],
 )
 
@@ -71,10 +69,6 @@ td_library(
         "tf_ops.td",
     ],
     includes = ["."],
-    visibility = [
-        # copybara:uncomment "//learning/brain/experimental/tfrt:__subpackages__",
-        # copybara:uncomment "//learning/infra/mira/distributed:__subpackages__",
-    ],
     deps = [
         ":mlrt_td_files",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_ops_td_files",
@@ -90,9 +84,7 @@ td_library(
         "tf_mlrt_tpu_ops.td",
     ],
     includes = ["."],
-    visibility = [
-        "//tensorflow/core/tfrt/mlrt:__subpackages__",
-    ],
+    visibility = ["//visibility:private"],
     deps = [
         ":mlrt_td_files",
         ":tf_mlrt_td_files",
@@ -159,9 +151,7 @@ cc_library(
     hdrs = ["tf_mlrt_ops.h"],
     visibility = [
         # copybara:uncomment "//learning/brain/experimental/tfrt/mlrt/application/tensorflow/tests:__subpackages__",
-        # copybara:uncomment "//learning/infra/mira/distributed:__subpackages__",
         "//tensorflow/compiler/mlir/tfrt:__subpackages__",
-        "//tensorflow/core/tfrt/mlrt:__subpackages__",
     ],
     deps = [
         ":mlrt_ops",
@@ -170,6 +160,9 @@ cc_library(
         "//tensorflow/compiler/mlir/tensorflow",
         "//tensorflow/compiler/mlir/tensorflow:tensorflow_side_effects",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:InliningUtils",
+        "@llvm-project//mlir:SideEffectInterfaces",
+        "@llvm-project//mlir:Support",
         "@llvm-project//mlir:Transforms",
         "@tf_runtime//:compiler_tfrt_op_interfaces",
         "@tf_runtime//:compiler_tfrt_traits",
@@ -180,15 +173,13 @@ cc_library(
     name = "tf_mlrt_tpu_ops",
     srcs = ["tf_mlrt_tpu_ops.cc"],
     hdrs = ["tf_mlrt_tpu_ops.h"],
-    visibility = [
-        "//tensorflow/compiler/mlir/tfrt/transforms/mlrt:__subpackages__",
-        "//tensorflow/core/tfrt/mlrt:__subpackages__",
-    ],
+    visibility = ["//tensorflow/compiler/mlir/tfrt/transforms/mlrt:__subpackages__"],
     deps = [
         ":mlrt_ops",
         ":tf_mlrt_ops",
         ":tf_mlrt_tpu_ops_inc_gen",
         "//tensorflow/compiler/mlir/tensorflow",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:SideEffectInterfaces",
     ],
 )

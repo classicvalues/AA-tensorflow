@@ -22,6 +22,7 @@ limitations under the License.
 #include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "mlir/IR/BuiltinTypes.h"  // from @llvm-project
 #include "mlir/IR/IntegerSet.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/transforms/collection_ops_util.h"
 #include "tensorflow/dtensor/cc/constants.h"
 #include "tensorflow/dtensor/cc/tensor_layout.h"
@@ -40,7 +41,7 @@ Status CheckLayoutIsSupported(const Layout& layout) {
     return errors::InvalidArgument("Large mesh rank size is not supported",
                                    layout.ToString());
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status ValidateShapeAndGetNewShape(
@@ -70,7 +71,7 @@ Status ValidateShapeAndGetNewShape(
     }
     new_random_shape.emplace_back(op_dimension_size / dimension_sharding);
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 // Get a device seed for this layout and device_id.
@@ -85,10 +86,9 @@ StatusOr<mlir::Value> GetDeviceSeed(const Layout& layout, mlir::Operation* op) {
   // to use as the attribute attached to the squeeze op.
   llvm::SmallVector<int32_t, 4> layout_dims;
   llvm::SmallSet<int32_t, 4> layout_dims_set;
-  for (const ShardingSpec& spec : layout.sharding_specs()) {
-    if (Layout::IsUnshardedSpec(spec)) continue;
-    layout_dims.emplace_back(
-        layout.mesh().GetMeshDimIndexWithName(spec.sharding_spec()));
+  for (const auto& spec : layout.sharding_spec_strs()) {
+    if (Layout::IsUnshardedDimension(spec)) continue;
+    layout_dims.emplace_back(layout.mesh().GetMeshDimIndexWithName(spec));
     layout_dims_set.insert(layout_dims.back());
   }
   llvm::sort(layout_dims);
@@ -193,7 +193,7 @@ StatusOr<mlir::Value> ComputeNewSeed(mlir::OpBuilder& builder,
                                      mlir::Value op_seed) {
   TF_ASSIGN_OR_RETURN(auto device_id_seed, GetDeviceSeed(layout, op));
   mlir::Type seed_type =
-      op_seed.getType().cast<mlir::TensorType>().getElementType();
+      mlir::cast<mlir::TensorType>(op_seed.getType()).getElementType();
 
   device_id_seed = builder.create<mlir::TF::CastOp>(
       location, mlir::RankedTensorType::get({}, seed_type), device_id_seed);
@@ -223,8 +223,8 @@ StatusOr<mlir::Operation*> CreatedShardedLocalRandomOpV1(const Layout& layout,
   // StatelessRandom op is used to make random op SPMD expansion
   // deterministic.
   mlir::Type new_random_type = mlir::RankedTensorType::get(
-      new_random_shape,
-      op->getResult(0).getType().cast<mlir::TensorType>().getElementType());
+      new_random_shape, mlir::cast<mlir::TensorType>(op->getResult(0).getType())
+                            .getElementType());
 
   auto new_shape_value = Int64Const(builder, location, new_random_shape);
   // TODO(zhonglinhan) : check different input for StatelessRandomUniformInt
@@ -255,8 +255,8 @@ StatusOr<mlir::Operation*> CreatedShardedLocalRandomOpV2(const Layout& layout,
   // StatelessRandom op is used to make random op SPMD expansion
   // deterministic.
   mlir::Type new_random_type = mlir::RankedTensorType::get(
-      new_random_shape,
-      op->getResult(0).getType().cast<mlir::TensorType>().getElementType());
+      new_random_shape, mlir::cast<mlir::TensorType>(op->getResult(0).getType())
+                            .getElementType());
 
   auto new_shape_value = Int64Const(builder, location, new_random_shape);
 
@@ -288,8 +288,8 @@ StatusOr<mlir::Operation*> CreatedShardedLocalRandomOpV2Range(
   // StatelessRandom op is used to make random op SPMD expansion
   // deterministic.
   mlir::Type new_random_type = mlir::RankedTensorType::get(
-      new_random_shape,
-      op->getResult(0).getType().cast<mlir::TensorType>().getElementType());
+      new_random_shape, mlir::cast<mlir::TensorType>(op->getResult(0).getType())
+                            .getElementType());
 
   auto new_shape_value = Int64Const(builder, location, new_random_shape);
 

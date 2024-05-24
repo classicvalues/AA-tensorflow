@@ -1,5 +1,5 @@
-load("//tensorflow:strict.default.bzl", "py_strict_test")
 load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+load("//tensorflow:strict.default.bzl", "py_strict_library", "py_strict_test")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -8,7 +8,7 @@ package(
     ],
 )
 
-py_library(
+py_strict_library(
     name = "free_vars_detect",
     srcs = [
         "free_vars_detect.py",
@@ -34,9 +34,10 @@ py_strict_test(
     ],
     deps = [
         ":free_vars_detect",
-        "//tensorflow/python/util:tf_decorator",
-        "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
+        #internal proto upb dep
+        "//third_party/py/numpy",
+        "//tensorflow/python/util:tf_decorator_py",
     ],
 )
 
@@ -45,13 +46,14 @@ py_strict_test(
     srcs = ["by_ref_capture_test.py"],
     python_version = "PY3",
     deps = [
+        "@absl_py//absl/testing:parameterized",
+        #internal proto upb dep
         "//tensorflow/python/compat:v2_compat",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:combinations",
         "//tensorflow/python/framework:constant_op",
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/platform:client_testlib",
-        "@absl_py//absl/testing:parameterized",
     ],
 )
 
@@ -76,18 +78,26 @@ py_strict_test(
     python_version = "PY3",
     deps = [
         ":capture_container",
+        "@absl_py//absl/testing:parameterized",
+        #internal proto upb dep
         "//tensorflow/core/function/trace_type",
         "//tensorflow/python/platform:client_testlib",
-        "@absl_py//absl/testing:parameterized",
     ],
 )
 
-py_library(
+py_strict_library(
     name = "restore_captures",
     srcs = ["restore_captures.py"],
     srcs_version = "PY3",
     visibility = ["//tensorflow:internal"],
     deps = [
+        "//tensorflow/core/function/polymorphism:function_type",
+        "//tensorflow/python/framework:dtypes",
+        "//tensorflow/python/framework:ops",
+        "//tensorflow/python/framework:tensor_util",
+        "//tensorflow/python/ops:handle_data_util",
+        "//tensorflow/python/ops:resource_variable_ops",
+        "//tensorflow/python/ops:variables",
         "//tensorflow/python/trackable:asset",
         "//tensorflow/python/trackable:resource",
     ],

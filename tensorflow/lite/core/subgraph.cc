@@ -30,10 +30,12 @@ limitations under the License.
 #include <vector>
 
 #include "tensorflow/lite/allocation.h"
+#include "tensorflow/lite/array.h"
 #include "tensorflow/lite/builtin_ops.h"
 #include "tensorflow/lite/c/common_internal.h"
 #include "tensorflow/lite/context_util.h"
 #include "tensorflow/lite/core/api/error_reporter.h"
+#include "tensorflow/lite/core/api/op_resolver.h"
 #include "tensorflow/lite/core/api/profiler.h"
 #include "tensorflow/lite/core/api/tensor_utils.h"
 #include "tensorflow/lite/core/c/c_api_types.h"
@@ -252,6 +254,7 @@ Subgraph::Subgraph(ErrorReporter* error_reporter,
                    resource::InitializationStatusMap* initialization_status_map,
                    int subgraph_index)
     : external_contexts_(external_contexts),
+      registration_externals_(new internal::OperatorsCache),
       error_reporter_(error_reporter),
       next_execution_plan_index_to_prepare_(0),
       next_execution_plan_index_to_plan_allocation_(0),
@@ -467,10 +470,10 @@ void PopulatePreviewDelegateParams(const NodeSubset& node_subset,
 // a nested 'custom_name' field defined inside the optionally set
 // 'registration_external' structure.  The top-level field takes precedence over
 // the nested field.  'TfLiteRegistration'
-// objects can optionally carry a 'TfLiteRegistrationExternal' pointer in their
+// objects can optionally carry a 'TfLiteOperator' pointer in their
 // 'registration_external' field.  If that's the case then the
 // 'TfLiteRegistration' object is merely a wrapper over a
-// 'TfLiteRegistrationExternal', with all fields except 'registration_external'
+// 'TfLiteOperator', with all fields except 'registration_external'
 // being null, that contains the actual logic that the registration represents.
 // See also the comment inside
 // 'TfLiteOpaqueContextReplaceNodeSubsetsWithDelegateKernels'.
@@ -509,8 +512,34 @@ TfLiteStatus Subgraph::ReplaceNodeSubsetsWithDelegateKernels(
   // The subgraph is taking ownership of the external registration, in case the
   // user has supplied an opaque delegate.
   if (TfLiteDelegateHasValidOpaqueDelegateBuilder(delegate)) {
-    registration_externals_.insert(std::unique_ptr<TfLiteRegistrationExternal>(
-        registration.registration_external));
+    // If the user has supplied an opaque delegate, then they _must_ also use
+    // TfLiteOperator.
+    if (!registration.registration_external) {
+      TFLITE_LOG(
+          tflite::TFLITE_LOG_WARNING,
+          "For a delegate with the 'opaque_delegate_builder' field set, the "
+          "delegate kernel's TfLiteRegistration object must have the "
+          "'registration_external' field set.");
+      return kTfLiteDelegateError;
+    }
+
+    // In this case, the subgraph takes ownership of the external registration.
+    OpResolver::OpId op_id{registration.registration_external->builtin_code,
+                           registration.registration_external->custom_name,
+                           registration.registration_external->version};
+    auto [it, inserted] = registration_externals_->emplace(
+        op_id,
+        std::unique_ptr<TfLiteOperator>(registration.registration_external));
+    // If there was already an entry for this op_id in the
+    // registration_externals_ cache, the statement above will have
+    // no effect on the registration_externals_ cache,
+    // but will deallocate registration.registration_externals.
+    // To ensure that registration remains valid, we need to use the
+    // registration_externals value that was previously in the cache.
+    if (!inserted) {
+      auto registration_external_from_cache = it->second.get();
+      registration.registration_external = registration_external_from_cache;
+    }
   }
 
   // Ignore empty node replacement sets.
@@ -706,6 +735,46 @@ TfLiteStatus Subgraph::MarkSubgraphAsDelegationSkippable(int subgraph_index) {
   return kTfLiteOk;
 }
 
+TfLiteStatus Subgraph::GetNodeInitDataMmapInfo(
+    const TfLiteNode* node, int* fd,
+    int64_t* custom_initial_data_offset_in_file,
+    int64_t* custom_initial_data_size) const {
+  if (!allocation_) {
+    return kTfLiteError;
+  }
+
+  if (allocation_->type() != tflite::Allocation::Type::kMMap) {
+    return kTfLiteError;
+  }
+
+  const MMAPAllocation* mmap_alloc =
+      static_cast<const MMAPAllocation*>(allocation_);
+  *fd = mmap_alloc->fd();
+  if (node->custom_initial_data == nullptr) {
+    *custom_initial_data_offset_in_file = -1;
+    *custom_initial_data_size = -1;
+    // The node does not have custom init data.  Deliberately return 'kTfLiteOk'
+    // so that clients can distinguish the following scenarios:
+    // - The TF Lite runtime does not have 'MMAPAllocation' available and
+    //   therefore can not possibly load the FD/offset/size tuple associcated
+    //   with a node's custom init data, return 'kTfLiteError' in this case.
+    // - The TF Lite runtime does have 'MMAPAllocation' available, but the
+    //   specific 'node' that has been supplied happens to have 'null' set as
+    //   its custom init data address.  Return 'kTfLiteOk' but set offset and
+    //   size to -1.
+    return kTfLiteOk;
+  }
+
+  const size_t custom_initial_data_offset =
+      reinterpret_cast<const uint8_t*>(node->custom_initial_data) -
+      reinterpret_cast<const uint8_t*>(mmap_alloc->mmapped_buffer());
+
+  *custom_initial_data_offset_in_file =
+      custom_initial_data_offset + mmap_alloc->mmapped_buffer_offset_in_file();
+  *custom_initial_data_size = node->custom_initial_data_size;
+  return kTfLiteOk;
+}
+
 TfLiteStatus Subgraph::PreviewDelegatePartitioning(
     const TfLiteIntArray* nodes_to_replace,
     TfLiteDelegateParams** partition_params_array, int* num_partitions) {
@@ -806,6 +875,7 @@ TfLiteStatus Subgraph::Cancel() {
   if (continue_invocation_) {
     // Sets cancellation flag to false so cancellation check between nodes will
     // cancel the invocation.
+
     continue_invocation_->clear();
     return kTfLiteOk;
   }
@@ -872,6 +942,26 @@ TfLiteStatus Subgraph::CheckInputAndOutputForOverlap(const int* input_indices,
     }
   }
   return kTfLiteOk;
+}
+
+std::vector<int> Subgraph::GetInputTensorsCount() {
+  std::vector<int> input_tensors_count(tensors_.size(), 0);
+  for (int execution_plan_index = 0;
+       execution_plan_index < execution_plan().size(); execution_plan_index++) {
+    int node_index = execution_plan()[execution_plan_index];
+    TfLiteNode& node = nodes_and_registration_[node_index].first;
+    if (node.inputs->size > 0) {
+      for (int i = 0; i < node.inputs->size; ++i) {
+        const int input_idx = node.inputs->data[i];
+        if (input_idx == kTfLiteOptionalTensor) continue;
+        input_tensors_count[input_idx]++;
+      }
+    }
+  }
+  for (int i = 0; i < outputs_.size(); ++i) {
+    input_tensors_count[outputs_[i]]++;
+  }
+  return input_tensors_count;
 }
 
 TfLiteStatus Subgraph::AllocateTensors() {
@@ -1079,7 +1169,13 @@ bool Subgraph::OpMightHaveSideEffect(
 }
 
 TfLiteStatus Subgraph::ResizeInputTensor(int tensor_index,
-                                         const std::vector<int>& dims) {
+                                         const int* const dims_data,
+                                         const int rank) {
+  if (rank && !dims_data) {
+    ReportError("ResizeInputTensor was given a NULL shape.");
+    return kTfLiteError;
+  }
+
   const bool delegates_applied = !delegates_applied_.empty();
   const bool graph_is_immutable = state_ == kStateInvokableAndImmutable;
   if (graph_is_immutable && !delegates_applied) {
@@ -1098,7 +1194,7 @@ TfLiteStatus Subgraph::ResizeInputTensor(int tensor_index,
   // the subgraph won't allocate memory for a dynamic tensor when its size
   // is equal to the original tensor size.
   if (tensor->data.raw != nullptr &&
-      EqualArrayAndTfLiteIntArray(tensor->dims, dims.size(), dims.data())) {
+      EqualArrayAndTfLiteIntArray(tensor->dims, rank, dims_data)) {
     return kTfLiteOk;
   }
 
@@ -1107,7 +1203,12 @@ TfLiteStatus Subgraph::ResizeInputTensor(int tensor_index,
     TF_LITE_ENSURE_STATUS(UndoAllDelegates());
   }
   state_ = kStateUninvokable;
-  return ResizeTensorImpl(tensor, ConvertVectorToTfLiteIntArray(dims));
+  return ResizeTensorImpl(tensor, BuildTfLiteArray(rank, dims_data).release());
+}
+
+TfLiteStatus Subgraph::ResizeInputTensor(int tensor_index,
+                                         const std::vector<int>& dims) {
+  return ResizeInputTensor(tensor_index, dims.data(), dims.size());
 }
 
 TfLiteStatus Subgraph::ResizeInputTensorStrict(int tensor_index,
@@ -1182,17 +1283,17 @@ TfLiteStatus Subgraph::ReleaseMemory() {
 void* Subgraph::OpInit(const TfLiteRegistration& op_reg, const char* buffer,
                        size_t length) {
   // Delegates that use the stable delegate API to iterate over the nodes and
-  // registrations are presented with ABI stable 'TfLiteRegistrationExternal'
+  // registrations are presented with ABI stable 'TfLiteOperator'
   // pointers, as opposed to ABI unstable 'TfLiteRegistration' pointers, even
   // for builtin OPs like ADD or SUB.  A knock-on effect of this behavior is
   // that we need to differentiate two scenarios when interacting with a
-  // 'TfLiteRegistrationExternal'.
+  // 'TfLiteOperator'.
   // 1. In the 'wrapper' scenario described above we use the 'node_index' field
   //    that points us to the corresponding 'TfLiteRegistration' that holds the
   //    callbacks that need to be invoked.
-  // 2. Otherwise the 'TfLiteRegistrationExternal' is either a stable custom OP,
+  // 2. Otherwise the 'TfLiteOperator' is either a stable custom OP,
   //    or a stable delegate kernel, and in both of those cases we need to use
-  //    the callbacks stored within the 'TfLiteRegistrationExternal' itself.
+  //    the callbacks stored within the 'TfLiteOperator' itself.
   if (op_reg.registration_external &&
       op_reg.registration_external->node_index != -1) {
     TfLiteRegistration* referenced_registration =
@@ -1213,17 +1314,17 @@ void* Subgraph::OpInit(const TfLiteRegistration& op_reg, const char* buffer,
 TfLiteStatus Subgraph::OpPrepare(const TfLiteRegistration& op_reg,
                                  TfLiteNode* node) {
   // Delegates that use the stable delegate API to iterate over the nodes and
-  // registrations are presented with ABI stable 'TfLiteRegistrationExternal'
+  // registrations are presented with ABI stable 'TfLiteOperator'
   // pointers, as opposed to ABI unstable 'TfLiteRegistration' pointers, even
   // for builtin OPs like ADD or SUB.  A knock-on effect of this behavior is
   // that we need to differentiate two scenarios when interacting with a
-  // 'TfLiteRegistrationExternal'.
+  // 'TfLiteOperator'.
   // 1. In the 'wrapper' scenario described above we use the 'node_index' field
   //    that points us to the corresponding 'TfLiteRegistration' that holds the
   //    callbacks that need to be invoked.
-  // 2. Otherwise the 'TfLiteRegistrationExternal' is either a stable custom OP,
+  // 2. Otherwise the 'TfLiteOperator' is either a stable custom OP,
   //    or a stable delegate kernel, and in both of those cases we need to use
-  //    the callbacks stored within the 'TfLiteRegistrationExternal' itself.
+  //    the callbacks stored within the 'TfLiteOperator' itself.
   if (op_reg.registration_external &&
       op_reg.registration_external->node_index != -1) {
     TfLiteRegistration* referenced_registration =
@@ -1279,17 +1380,17 @@ TfLiteStatus Subgraph::OpPrepare(const TfLiteRegistration& op_reg,
 TfLiteStatus Subgraph::OpInvoke(const TfLiteRegistration& op_reg,
                                 TfLiteNode* node) {
   // Delegates that use the stable delegate API to iterate over the nodes and
-  // registrations are presented with ABI stable 'TfLiteRegistrationExternal'
+  // registrations are presented with ABI stable 'TfLiteOperator'
   // pointers, as opposed to ABI unstable 'TfLiteRegistration' pointers, even
   // for builtin OPs like ADD or SUB.  A knock-on effect of this behavior is
   // that we need to differentiate two scenarios when interacting with a
-  // 'TfLiteRegistrationExternal'.
+  // 'TfLiteOperator'.
   // 1. In the 'wrapper' scenario described above we use the 'node_index' field
   //    that points us to the corresponding 'TfLiteRegistration' that holds the
   //    callbacks that need to be invoked.
-  // 2. Otherwise the 'TfLiteRegistrationExternal' is either a stable custom OP,
+  // 2. Otherwise the 'TfLiteOperator' is either a stable custom OP,
   //    or a stable delegate kernel, and in both of those cases we need to use
-  //    the callbacks stored within the 'TfLiteRegistrationExternal' itself.
+  //    the callbacks stored within the 'TfLiteOperator' itself.
   if (op_reg.registration_external &&
       op_reg.registration_external->node_index != -1) {
     TfLiteRegistration* referenced_registration =
@@ -1312,17 +1413,17 @@ TfLiteStatus Subgraph::OpInvoke(const TfLiteRegistration& op_reg,
 // If registration_external is valid, use the 'free' callback from that.
 void Subgraph::OpFree(const TfLiteRegistration& op_reg, void* buffer) {
   // Delegates that use the stable delegate API to iterate over the nodes and
-  // registrations are presented with ABI stable 'TfLiteRegistrationExternal'
+  // registrations are presented with ABI stable 'TfLiteOperator'
   // pointers, as opposed to ABI unstable 'TfLiteRegistration' pointers, even
   // for builtin OPs like ADD or SUB.  A knock-on effect of this behavior is
   // that we need to differentiate two scenarios when interacting with a
-  // 'TfLiteRegistrationExternal'.
+  // 'TfLiteOperator'.
   // 1. In the 'wrapper' scenario described above we use the 'node_index' field
   //    that points us to the corresponding 'TfLiteRegistration' that holds the
   //    callbacks that need to be invoked.
-  // 2. Otherwise the 'TfLiteRegistrationExternal' is either a stable custom OP,
+  // 2. Otherwise the 'TfLiteOperator' is either a stable custom OP,
   //    or a stable delegate kernel, and in both of those cases we need to use
-  //    the callbacks stored within the 'TfLiteRegistrationExternal' itself.
+  //    the callbacks stored within the 'TfLiteOperator' itself.
   if (op_reg.registration_external &&
       op_reg.registration_external->node_index != -1 && buffer) {
     TfLiteRegistration* referenced_registration =
@@ -1346,6 +1447,7 @@ TfLiteStatus Subgraph::MayAllocateOpOutput(TfLiteNode* node) {
   if (ShouldOptimizeMemoryForLargeTensors()) {
     for (int i = 0; i < node->outputs->size; ++i) {
       int tensor_index = node->outputs->data[i];
+      if (tensor_index == kTfLiteOptionalTensor) continue;
       TfLiteTensor* tensor = &context_.tensors[tensor_index];
       if (tensor->data.raw == nullptr &&
           tensor->allocation_type == kTfLiteDynamic) {
@@ -1475,36 +1577,13 @@ TfLiteStatus Subgraph::PrepareOpsAndTensors() {
 }
 
 TfLiteStatus Subgraph::RemoveUnusedInputs() {
-  auto graph_info = CreateGraphInfo();
-  std::vector<int> refcounts(graph_info->num_tensors(), 0);
-
-  for (int tensor_index : graph_info->variables()) {
-    refcounts[tensor_index]++;
-  }
-  // Count references to node input tensors.
-  const size_t num_execution_nodes = graph_info->num_execution_nodes();
-  for (size_t i = 0; i < num_execution_nodes; ++i) {
-    const TfLiteNode& node = graph_info->node(i);
-    TfLiteIntArray* node_inputs = node.inputs;
-    for (int j = 0; j < node_inputs->size; ++j) {
-      int tensor_index = node_inputs->data[j];
-      if (tensor_index != kTfLiteOptionalTensor) {
-        refcounts[tensor_index]++;
-      }
-    }
-  }
-  // Count references to SubGraph output tensors.
-  for (auto iter = outputs_.begin(); iter != outputs_.end(); iter++) {
-    if (*iter == kTfLiteOptionalTensor) continue;
-    refcounts[*iter]++;
-  }
-
+  std::vector<int> input_tensors_count = GetInputTensorsCount();
   // Mark unused inputs as kTfLiteOptionalTensor.
-  for (auto iter = inputs_.begin(); iter != inputs_.end(); iter++) {
-    if (*iter == kTfLiteOptionalTensor) continue;
-    if (refcounts[*iter] == 0) {
-      tensor(*iter)->bytes = 0;  // To make it clearer for memory analysis.
-      *iter = kTfLiteOptionalTensor;
+  for (int& tensor_idx : inputs()) {
+    if (tensor_idx == kTfLiteOptionalTensor) continue;
+    if (input_tensors_count[tensor_idx] == 0) {
+      tensor(tensor_idx)->bytes = 0;  // To make it clearer for memory analysis.
+      tensor_idx = kTfLiteOptionalTensor;
     }
   }
   return kTfLiteOk;
@@ -1659,15 +1738,35 @@ TfLiteStatus Subgraph::InvokeImpl() {
 TfLiteStatus Subgraph::ResizeTensor(TfLiteContext* context,
                                     TfLiteTensor* tensor,
                                     TfLiteIntArray* new_size) {
-  // If the dimensions don't change, avoiding
-  // unnecessary (re)allocations.
+  // If the dimensions don't change, avoid unnecessary (re)allocations.
   //
   // Note that it's required to check `tensor->data.raw != nullptr`. Otherwise
   // the subgraph won't allocate memory for a dynamic tensor when its size
   // is equal to the original tensor size.
-  if (tensor->data.raw != nullptr &&
-      EqualArrayAndTfLiteIntArray(tensor->dims, new_size->size,
-                                  new_size->data)) {
+  //
+  // We also need to check the bytes count because some direct calls to
+  // TfLiteTensorResizeMaybeCopy may lead to inconsistent dims and bytes in a
+  // tensor.
+  const bool can_reuse_allocation = [tensor, new_size, context] {
+    if (tensor->data.raw == nullptr) {
+      return false;
+    }
+    if (!EqualArrayAndTfLiteIntArray(tensor->dims, new_size->size,
+                                     new_size->data)) {
+      return false;
+    }
+    // Those data types byte sizes are not handled by `ResizeTensorImpl`.
+    if (tensor->type == kTfLiteString || tensor->type == kTfLiteResource ||
+        tensor->type == kTfLiteVariant) {
+      return true;
+    }
+    size_t new_bytes = 0;
+    tflite::BytesRequired(tensor->type, tensor->dims->data, tensor->dims->size,
+                          &new_bytes, context);
+    return new_bytes == tensor->bytes;
+  }();
+
+  if (can_reuse_allocation) {
     // A number of clients assume |new_size| remains valid upon success, so
     // swap it in as the new (but logically identical) tensor dims.
     if (new_size != tensor->dims) {
@@ -1715,6 +1814,7 @@ TfLiteStatus Subgraph::AddTensors(int tensors_to_add,
                                   int* first_new_tensor_index) {
   const size_t base_index = tensors_.size();
   if (first_new_tensor_index) *first_new_tensor_index = base_index;
+  if (tensors_to_add < 0) return kTfLiteError;
   tensors_.resize(tensors_.size() + tensors_to_add);
   for (size_t i = base_index; i < tensors_.size(); i++) {
     memset(&tensors_[i], 0, sizeof(tensors_[i]));
@@ -1756,7 +1856,8 @@ TfLiteStatus Subgraph::GetNodeAndRegistration(
 TfLiteStatus Subgraph::SetTensorParametersReadOnly(
     int tensor_index, TfLiteType type, const char* name, const size_t ndims,
     const int* dims, TfLiteQuantization quantization, const char* buffer,
-    size_t bytes, const Allocation* allocation, TfLiteSparsity* sparsity) {
+    size_t bytes, const Allocation* allocation, TfLiteSparsity* sparsity,
+    const size_t buffer_identifier) {
   // Ensure quantization cleanup on failure.
   ScopedTfLiteQuantization scoped_quantization(&quantization);
   ScopedTfLiteSparsity scoped_sparsity(sparsity);
@@ -1779,7 +1880,7 @@ TfLiteStatus Subgraph::SetTensorParametersReadOnly(
     TF_LITE_ENSURE_OK(
         &context_,
         tflite::BytesRequired(type, dims, ndims, &required_bytes, &context_));
-    TF_LITE_ENSURE_EQ(&context_, required_bytes, bytes);
+    TF_LITE_ENSURE(&context_, required_bytes <= bytes);
   }
 
   TfLiteTensor& tensor = context_.tensors[tensor_index];
@@ -1803,6 +1904,9 @@ TfLiteStatus Subgraph::SetTensorParametersReadOnly(
                       allocation, false, &tensor);
     tensor.quantization = *scoped_quantization.release();
     tensor.sparsity = scoped_sparsity.release();
+  }
+  if (buffer_identifier != kTfLiteNoBufferIdentifier) {
+    tensor_buffer_identifiers_[tensor_index] = buffer_identifier;
   }
   return kTfLiteOk;
 }
@@ -1882,18 +1986,18 @@ TfLiteStatus Subgraph::ResizeTensorImpl(TfLiteTensor* tensor,
         TfLiteIntArrayEqual(tensor->dims, new_size) == 0;
     if (tensor->type != kTfLiteString && tensor->type != kTfLiteResource &&
         tensor->type != kTfLiteVariant) {
-      size_t bytesRequired;
+      size_t bytes_required;
       TfLiteStatus status =
           tflite::BytesRequired(tensor->type, new_size->data, new_size->size,
-                                &bytesRequired, &context_);
+                                &bytes_required, &context_);
       if (status != kTfLiteOk) {
         TfLiteIntArrayFree(new_size);
         return kTfLiteError;
       }
 
       // Realloc space for heap-allocated tensors.
-      TfLiteTensorResizeMaybeCopy(bytesRequired, tensor, false);
-      tensor->bytes = bytesRequired;
+      TfLiteTensorResizeMaybeCopy(bytes_required, tensor, false);
+      tensor->bytes = bytes_required;
     }
     if (tensor->dims && tensor->dims != new_size) {
       TfLiteIntArrayFree(tensor->dims);
@@ -2178,7 +2282,7 @@ TfLiteStatus Subgraph::ModifyGraphWithDelegateImpl(TfLiteDelegate* delegate) {
         0, execution_plan_, &last_execution_plan_index_prepared));
     if (has_dynamic_tensors_) {
       TF_LITE_ENSURE_STATUS(EnsureMemoryAllocations());
-      TFLITE_LOG(
+      TFLITE_LOG_PROD_ONCE(
           tflite::TFLITE_LOG_WARNING,
           "Attempting to use a delegate that only supports static-sized "
           "tensors with a graph that has dynamic-sized tensors (tensor#%d is a "

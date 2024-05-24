@@ -1136,6 +1136,7 @@ to be batched.}]>:$captured_tensors,
     DefaultValuedOptionalAttr<I64Attr, "0">:$low_priority_batch_timeout_micros,
     DefaultValuedOptionalAttr<I64ArrayAttr, "{}">:$low_priority_allowed_batch_sizes,
     DefaultValuedOptionalAttr<I64Attr, "0">:$low_priority_max_enqueued_batches,
+    DefaultValuedOptionalAttr<TF_AnyStrAttrOf<["low_priority_padding_with_max_batch_size", "low_priority_padding_with_next_allowed_batch_size", "priority_isolation"]>, "\"low_priority_padding_with_max_batch_size\"">:$mixed_priority_policy,
     DefaultValuedOptionalAttr<BoolAttr, "false">:$enable_large_batch_splitting
   );
 
@@ -1159,7 +1160,7 @@ to be batched.}]>:$captured_tensors,
 
     // Gets the argument operands to the called function.
     operand_range getArgOperands() {
-      // Merge `in_tensors` and `captured_tensors`. `operand_segment_sizes`
+      // Merge `in_tensors` and `captured_tensors`. `operandSegmentSizes`
       // has two elements, so it will be merging two operand ranges (the two
       // variadic arguments). Attributes like `batch_timeout_micros` will not
       // make it to the return array.
@@ -1198,7 +1199,9 @@ It is computed as:
     Arg<TensorOf<[TF_Bfloat16, TF_Complex128, TF_Complex64, TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64]>, [{2-D or higher with shape `[..., r_y, c_y]`.}]>:$y,
 
     DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_x,
-    DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_y
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_y,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$grad_x,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$grad_y
   );
 
   let results = (outs
@@ -1245,7 +1248,9 @@ about broadcasting
     Arg<TensorOf<[TF_Bfloat16, TF_Complex128, TF_Complex64, TF_Float16, TF_Float32, TF_Float64, TF_Int16, TF_Int32, TF_Int64, TF_Uint16, TF_Uint32, TF_Uint64, TF_Uint8]>, [{2-D or higher with shape `[..., r_y, c_y]`.}]>:$y,
 
     DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_x,
-    DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_y
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_y,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$grad_x,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$grad_y
   );
 
   let results = (outs
@@ -1292,7 +1297,9 @@ about broadcasting
     Arg<TensorOf<[TF_Bfloat16, TF_Complex128, TF_Complex64, TF_Float16, TF_Float32, TF_Float64, TF_Int16, TF_Int32, TF_Int64, TF_Int8, TF_Uint8]>, [{2-D or higher with shape `[..., r_y, c_y]`.}]>:$y,
 
     DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_x,
-    DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_y
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$adj_y,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$grad_x,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$grad_y
   );
 
   let results = (outs
@@ -2095,7 +2102,7 @@ def TF_CeilOp : TF_Op<"Ceil", [Pure, TF_Idempotent, TF_SameOperandsAndResultType
   }];
 }
 
-def TF_CheckNumericsOp : TF_Op<"CheckNumerics", [TF_SameOperandsAndResultTypeResolveRef]> {
+def TF_CheckNumericsOp : TF_Op<"CheckNumerics", [TF_MustExecute, TF_NoConstantFold, TF_SameOperandsAndResultTypeResolveRef]> {
   let summary = "Checks a tensor for NaN and Inf values.";
 
   let description = [{
@@ -2179,6 +2186,12 @@ def TF_CollectiveAllToAllV2Op : TF_Op<"CollectiveAllToAllV2", [DeclareOpInterfac
 Mutually exchanges multiple tensors of identical type and shape.
   }];
 
+  let description = [{
+`is_stateless` means each op does not need control dependencies to other
+collective ops. In this case, keys that are unique at runtime
+(e.g. `instance_key`) should be used to distinguish collective groups.
+  }];
+
   let arguments = (ins
     TF_FpOrI32OrI64Tensor:$input,
     TF_Int32Tensor:$group_size,
@@ -2187,7 +2200,8 @@ Mutually exchanges multiple tensors of identical type and shape.
     Variadic<TF_ResourceTensor>:$ordering_token,
 
     DefaultValuedOptionalAttr<StrAttr, "\"auto\"">:$communication_hint,
-    DefaultValuedOptionalAttr<F32Attr, "0.0f">:$timeout_seconds
+    DefaultValuedOptionalAttr<F32Attr, "0.0f">:$timeout_seconds,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$is_stateless
   );
 
   let results = (outs
@@ -2281,6 +2295,12 @@ def TF_CollectiveGatherV2Op : TF_Op<"CollectiveGatherV2", [DeclareOpInterfaceMet
 Mutually accumulates multiple tensors of identical type and shape.
   }];
 
+  let description = [{
+`is_stateless` means each op does not need control dependencies to other
+collective ops. In this case, keys that are unique at runtime
+(e.g. `instance_key`) should be used to distinguish collective groups.
+  }];
+
   let arguments = (ins
     TensorOf<[TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64]>:$input,
     TF_Int32Tensor:$group_size,
@@ -2289,7 +2309,8 @@ Mutually accumulates multiple tensors of identical type and shape.
     Variadic<TF_ResourceTensor>:$ordering_token,
 
     DefaultValuedOptionalAttr<StrAttr, "\"auto\"">:$communication_hint,
-    DefaultValuedOptionalAttr<F32Attr, "0.0f">:$timeout_seconds
+    DefaultValuedOptionalAttr<F32Attr, "0.0f">:$timeout_seconds,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$is_stateless
   );
 
   let results = (outs
@@ -2361,6 +2382,12 @@ def TF_CollectiveReduceScatterV2Op : TF_Op<"CollectiveReduceScatterV2", [Declare
 Mutually reduces multiple tensors of identical type and shape and scatters the result.
   }];
 
+  let description = [{
+`is_stateless` means each op does not need control dependencies to other
+collective ops. In this case, keys that are unique at runtime
+(e.g. `instance_key`) should be used to distinguish collective groups.
+  }];
+
   let arguments = (ins
     TF_FpOrI32OrI64Tensor:$input,
     TF_Int32Tensor:$group_size,
@@ -2372,6 +2399,7 @@ Mutually reduces multiple tensors of identical type and shape and scatters the r
     TF_AnyStrAttrOf<["Id", "Div"]>:$final_op,
     DefaultValuedOptionalAttr<StrAttr, "\"auto\"">:$communication_hint,
     DefaultValuedOptionalAttr<F32Attr, "0.0f">:$timeout_seconds,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$is_stateless,
     DefaultValuedOptionalAttr<I64Attr, "-1">:$max_subdivs_per_device
   );
 
@@ -2388,6 +2416,12 @@ def TF_CollectiveReduceV2Op : TF_Op<"CollectiveReduceV2", [DeclareOpInterfaceMet
 Mutually reduces multiple tensors of identical type and shape.
   }];
 
+  let description = [{
+`is_stateless` means each op does not need control dependencies to other
+collective ops. In this case, keys that are unique at runtime
+(e.g. `instance_key`) should be used to distinguish collective groups.
+  }];
+
   let arguments = (ins
     TF_FpOrI32OrI64Tensor:$input,
     TF_Int32Tensor:$group_size,
@@ -2399,6 +2433,7 @@ Mutually reduces multiple tensors of identical type and shape.
     TF_AnyStrAttrOf<["Id", "Div"]>:$final_op,
     DefaultValuedOptionalAttr<StrAttr, "\"auto\"">:$communication_hint,
     DefaultValuedOptionalAttr<F32Attr, "0.0f">:$timeout_seconds,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$is_stateless,
     DefaultValuedOptionalAttr<I64Attr, "-1">:$max_subdivs_per_device
   );
 
@@ -2694,6 +2729,45 @@ used for communication with all hosts.}]>:$network_configs
   let results = (outs);
 
   TF_DerivedOperandSizeAttr N = TF_DerivedOperandSizeAttr<0>;
+}
+
+def TF_ConvOp : TF_Op<"Conv", [Pure]> {
+  let summary = [{
+Computes a N-D convolution given (N+1+batch_dims)-D `input` and (N+2)-D `filter` tensors.
+  }];
+
+  let description = [{
+General function for computing a N-D convolution. It is required that
+`1 <= N <= 3`.
+  }];
+
+  let arguments = (ins
+    Arg<TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32]>, [{Tensor of type T and shape `batch_shape + spatial_shape + [in_channels]` in the
+case that `channels_last_format = true` or shape
+`batch_shape + [in_channels] + spatial_shape` if `channels_last_format = false`.
+spatial_shape is N-dimensional with `N=2` or `N=3`.
+Also note that `batch_shape` is dictated by the parameter `batch_dims`
+and defaults to 1.}]>:$input,
+    Arg<TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32]>, [{An `(N+2)-D` Tensor with the same type as `input` and shape
+`spatial_filter_shape + [in_channels, out_channels]`, where spatial_filter_shape
+is N-dimensional with `N=2` or `N=3`.
+}]>:$filter,
+
+    I64ArrayAttr:$strides,
+    TF_AnyStrAttrOf<["SAME", "VALID", "EXPLICIT"]>:$padding,
+    DefaultValuedOptionalAttr<I64ArrayAttr, "{}">:$explicit_paddings,
+    DefaultValuedOptionalAttr<TF_AnyStrAttrOf<["CHANNELS_FIRST", "CHANNELS_LAST"]>, "\"CHANNELS_LAST\"">:$data_format,
+    DefaultValuedOptionalAttr<I64ArrayAttr, "{}">:$dilations,
+    DefaultValuedOptionalAttr<I64Attr, "1">:$batch_dims,
+    DefaultValuedOptionalAttr<I64Attr, "1">:$groups
+  );
+
+  let results = (outs
+    Res<TensorOf<[TF_Bfloat16, TF_Float16, TF_Float32, TF_Float64, TF_Int32]>, [{A (N+1+batch_dims)-D tensor. The dimension order is determined by the value of
+`channels_last_format`, see below for details.}]>:$output
+  );
+
+  TF_DerivedOperandTypeAttr T = TF_DerivedOperandTypeAttr<0>;
 }
 
 def TF_Conv2DOp : TF_Op<"Conv2D", [InferTensorType, Pure, TF_LayoutSensitiveInterface]> {
@@ -4384,7 +4458,7 @@ and the rest of `data[i].shape` must be constant w.r.t. `i`.  That is, we
 must have `data[i].shape = indices[i].shape + constant`.  In terms of this
 `constant`, the output shape is
 
-    merged.shape = [max(indices)] + constant
+    merged.shape = [max(indices) + 1] + constant
 
 Values are merged in order, so if an index appears in both `indices[m][i]` and
 `indices[n][j]` for `(m,i) < (n,j)` the slice `data[n][j]` will appear in the
@@ -6199,6 +6273,10 @@ indices.shape[batch_dims:] + params.shape[axis + 1:]` where:
 Note that on CPU, if an out of bound index is found, an error is returned.
 On GPU, if an out of bound index is found, a 0 is stored in the
 corresponding output value.
+
+Note that on TPU, if any dimension of `params` is of size 0 then the output will
+be the expected shape filled with zeros. On CPU and GPU an error will be
+returned.
 
 See also `tf.batch_gather` and `tf.gather_nd`.
   }];
@@ -8548,7 +8626,9 @@ cublas.
     TensorOf<[TF_Bfloat16, TF_Complex128, TF_Complex64, TF_Float16, TF_Float32, TF_Float64, TF_Int32, TF_Int64, TF_Uint16, TF_Uint32, TF_Uint64, TF_Uint8]>:$b,
 
     DefaultValuedOptionalAttr<BoolAttr, "false">:$transpose_a,
-    DefaultValuedOptionalAttr<BoolAttr, "false">:$transpose_b
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$transpose_b,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$grad_a,
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$grad_b
   );
 
   let results = (outs
@@ -11219,6 +11299,9 @@ underlying graph, and executes each of the partitioned subgraphs as a function.
   let extraClassDeclaration = [{
     // Gets the argument operands to the called function.
     operand_range getArgOperands() { return getArgs(); }
+    MutableOperandRange getArgOperandsMutable() {
+      return getArgsMutable();
+    }
 
     // Returns the callee of this operation.
     CallInterfaceCallable getCallableForCallee() { return getFAttr(); }
@@ -12236,7 +12319,7 @@ The generated values will have mean 0 and standard deviation 1.
   TF_DerivedResultTypeAttr dtype = TF_DerivedResultTypeAttr<0>;
 }
 
-def TF_RandomUniformOp : TF_Op<"RandomUniform", [TF_CannotDuplicate, TF_RandomGeneratorSideEffect]> {
+def TF_RandomUniformOp : TF_Op<"RandomUniform", [DeclareOpInterfaceMethods<TF_GetResourceInstanceInterface>, TF_CannotDuplicate, TF_RandomGeneratorSideEffect]> {
   let summary = "Outputs random values from a uniform distribution.";
 
   let description = [{
@@ -12383,6 +12466,18 @@ of the tensor. Rank is also known as "order", "degree", or "ndims."
   ];
 
   let hasFolder = 1;
+}
+
+def TF_ReadFileOp : TF_Op<"ReadFile", [Pure, TF_NoConstantFold]> {
+  let summary = "Reads and outputs the entire contents of the input filename.";
+
+  let arguments = (ins
+    TF_StrTensor:$filename
+  );
+
+  let results = (outs
+    TF_StrTensor:$contents
+  );
 }
 
 def TF_ReadVariableOp : TF_Op<"ReadVariableOp", []> {
@@ -12702,7 +12797,7 @@ the outputs of that operation (both work equivalently).}]>:$features
   }];
 }
 
-def TF_RemoteCallOp : TF_Op<"RemoteCall", []> {
+def TF_RemoteCallOp : TF_Op<"RemoteCall", [CallOpInterface]> {
   let summary = "Runs function `f` on a remote device indicated by `target`.";
 
   let arguments = (ins
@@ -12718,6 +12813,27 @@ def TF_RemoteCallOp : TF_Op<"RemoteCall", []> {
 
   TF_DerivedOperandTypeListAttr Tin = TF_DerivedOperandTypeListAttr<1>;
   TF_DerivedResultTypeListAttr Tout = TF_DerivedResultTypeListAttr<0>;
+
+  let extraClassDeclaration = [{
+    /// Get the argument operands to the called function.
+    operand_range getArgOperands() {
+      return getArgs();
+    }
+
+    MutableOperandRange getArgOperandsMutable() {
+      return getArgsMutable();
+    }
+
+    /// Return the callee of this operation.
+    CallInterfaceCallable getCallableForCallee() {
+      return (*this)->getAttrOfType<SymbolRefAttr>("f");
+    }
+
+    /// Set the callee for this operation.
+    void setCalleeFromCallable(CallInterfaceCallable callee) {
+      (*this)->setAttr("f", callee.get<SymbolRefAttr>());
+    }
+  }];
 }
 
 def TF_RepeatDatasetOp : TF_Op<"RepeatDataset", [Pure]> {
@@ -16902,7 +17018,9 @@ dimension, selecting a subset of dimension 0, specified by `indices`.
   let arguments = (ins
     TF_FloatTensor:$data,
     Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Has same rank as `segment_ids`.}]>:$indices,
-    Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Values should be sorted and can be repeated.}]>:$segment_ids
+    Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Values should be sorted and can be repeated.}]>:$segment_ids,
+
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$sparse_gradient
   );
 
   let results = (outs
@@ -16955,7 +17073,9 @@ for an explanation of segments.
     TF_FloatTensor:$data,
     Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Has same rank as `segment_ids`.}]>:$indices,
     Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Values should be sorted and can be repeated.}]>:$segment_ids,
-    Arg<TF_I32OrI64Tensor, [{Should equal the number of distinct segment IDs.}]>:$num_segments
+    Arg<TF_I32OrI64Tensor, [{Should equal the number of distinct segment IDs.}]>:$num_segments,
+
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$sparse_gradient
   );
 
   let results = (outs
@@ -16983,7 +17103,9 @@ See `tf.sparse.segment_sum` for usage examples.
   let arguments = (ins
     TF_FloatTensor:$data,
     Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Has same rank as `segment_ids`.}]>:$indices,
-    Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Values should be sorted and can be repeated.}]>:$segment_ids
+    Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Values should be sorted and can be repeated.}]>:$segment_ids,
+
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$sparse_gradient
   );
 
   let results = (outs
@@ -17040,7 +17162,9 @@ for an explanation of segments.
     TF_FloatTensor:$data,
     Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Has same rank as `segment_ids`.}]>:$indices,
     Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Values should be sorted and can be repeated.}]>:$segment_ids,
-    Arg<TF_I32OrI64Tensor, [{Should equal the number of distinct segment IDs.}]>:$num_segments
+    Arg<TF_I32OrI64Tensor, [{Should equal the number of distinct segment IDs.}]>:$num_segments,
+
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$sparse_gradient
   );
 
   let results = (outs
@@ -17092,7 +17216,9 @@ tf.segment_sum(c, tf.constant([0, 0, 1]))
   let arguments = (ins
     TF_IntOrFpTensor:$data,
     Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Has same rank as `segment_ids`.}]>:$indices,
-    Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Values should be sorted and can be repeated.}]>:$segment_ids
+    Arg<TF_I32OrI64Tensor, [{A 1-D tensor. Values should be sorted and can be repeated.}]>:$segment_ids,
+
+    DefaultValuedOptionalAttr<BoolAttr, "false">:$sparse_gradient
   );
 
   let results = (outs
@@ -19829,7 +19955,7 @@ array([[1, 2, 3, 1, 2, 3],
   }];
 
   let arguments = (ins
-    Arg<TF_Tensor, [{1-D or higher.}]>:$input,
+    Arg<TF_Tensor, [{Can be of any rank.}]>:$input,
     Arg<TF_I32OrI64Tensor, [{1-D. Length must be the same as the number of dimensions in `input`}]>:$multiples
   );
 
@@ -20606,6 +20732,72 @@ idx ==> [0, 1, 2, 3, 4, 4, 0, 1]
   );
 
   TF_DerivedOperandTypeAttr T = TF_DerivedOperandTypeAttr<0>;
+  TF_DerivedResultTypeAttr out_idx = TF_DerivedResultTypeAttr<1>;
+}
+
+def TF_UniqueV2Op : TF_Op<"UniqueV2", [Pure]> {
+  let summary = "Finds unique elements along an axis of a tensor.";
+
+  let description = [{
+This operation either returns a tensor `y` containing unique elements
+along the `axis` of a tensor. The returned unique elements is sorted
+in the same order as they occur along `axis` in `x`.
+This operation also returns a tensor `idx` that is the same size as
+the number of the elements in `x` along the `axis` dimension. It
+contains the index in the unique output `y`.
+In other words, for an `1-D` tensor `x` with `axis = None:
+
+`y[idx[i]] = x[i] for i in [0, 1,...,rank(x) - 1]`
+
+For example:
+
+```
+# tensor 'x' is [1, 1, 2, 4, 4, 4, 7, 8, 8]
+y, idx = unique(x)
+y ==> [1, 2, 4, 7, 8]
+idx ==> [0, 0, 1, 2, 2, 2, 3, 4, 4]
+```
+
+For an `2-D` tensor `x` with `axis = 0`:
+
+```
+# tensor 'x' is [[1, 0, 0],
+#                [1, 0, 0],
+#                [2, 0, 0]]
+y, idx = unique(x, axis=0)
+y ==> [[1, 0, 0],
+       [2, 0, 0]]
+idx ==> [0, 0, 1]
+```
+
+For an `2-D` tensor `x` with `axis = 1`:
+
+```
+# tensor 'x' is [[1, 0, 0],
+#                [1, 0, 0],
+#                [2, 0, 0]]
+y, idx = unique(x, axis=1)
+y ==> [[1, 0],
+       [1, 0],
+       [2, 0]]
+idx ==> [0, 1, 1]
+```
+  }];
+
+  let arguments = (ins
+    Arg<TF_Tensor, [{A `Tensor`.}]>:$x,
+    Arg<TF_I32OrI64Tensor, [{A `Tensor` of type `int32` (default: None). The axis of the Tensor to
+find the unique elements.}]>:$axis
+  );
+
+  let results = (outs
+    Res<TF_Tensor, [{A `Tensor`. Unique elements along the `axis` of `Tensor` x.}]>:$y,
+    Res<TF_I32OrI64Tensor, [{A 1-D Tensor. Has the same type as x that contains the index of each
+value of x in the output y.}]>:$idx
+  );
+
+  TF_DerivedOperandTypeAttr T = TF_DerivedOperandTypeAttr<0>;
+  TF_DerivedOperandTypeAttr Taxis = TF_DerivedOperandTypeAttr<1>;
   TF_DerivedResultTypeAttr out_idx = TF_DerivedResultTypeAttr<1>;
 }
 
@@ -21841,7 +22033,7 @@ a u64[2] and for PHILOX a u64[3].}]>:$initial_state,
 
   let results = (outs
     TF_Uint64Tensor:$output_key,
-    TensorOf<[TF_Int32, TF_Int64, TF_Uint32, TF_Uint64]>:$output
+    TensorOf<[TF_Int32, TF_Int64, TF_Int8, TF_Uint32, TF_Uint64, TF_Uint8]>:$output
   );
 
   TF_DerivedOperandTypeAttr Tshape = TF_DerivedOperandTypeAttr<2>;
@@ -22775,7 +22967,7 @@ execution the transfer corresponds to.}]>:$dynamic_key,
   TF_DerivedResultTypeListAttr Toutputs = TF_DerivedResultTypeListAttr<0>;
 }
 
-def TF__XlaRunOp : TF_Op<"_XlaRun", []> {
+def TF__XlaRunOp : TF_Op<"_XlaRun", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "XLA Run Op. For use by the XLA JIT only.";
 
   let description = [{

@@ -49,7 +49,7 @@ class TfThreadPoolWorkQueue : public WorkQueueInterface {
         intra_op_threadpool_(intra_op_threadpool),
         inter_op_threadpool_(inter_op_threadpool) {}
 
-  StatusOr<std::unique_ptr<WorkQueueInterface>> InitializeRequest(
+  absl::StatusOr<std::unique_ptr<WorkQueueInterface>> InitializeRequest(
       int64_t request_id) const override;
 
   int GetParallelismLevel() const override {
@@ -62,6 +62,7 @@ class TfThreadPoolWorkQueue : public WorkQueueInterface {
   std::optional<tfrt::TaskFunction> AddBlockingTask(
       tfrt::TaskFunction work, bool allow_queuing) override;
 
+  ABSL_DEPRECATED("Use the destructor instead.")
   void Quiesce() override;
 
   void Await(

@@ -7,7 +7,6 @@ package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
     default_visibility = [
         # copybara:uncomment "//learning/brain/experimental/tfrt:__subpackages__",
-        # copybara:uncomment "//learning/infra/mira/distributed:__subpackages__",
         # copybara:uncomment "//smartass/brain/ops/tfrt_kernels:__subpackages__",
         "//tensorflow/compiler/mlir/tfrt/transforms/mlrt:__subpackages__",
         "//tensorflow/core/tfrt:__subpackages__",
@@ -25,9 +24,11 @@ cc_library(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:Support",
     ],
 )
 
@@ -39,10 +40,13 @@ tf_cc_test(
         ":mlir_to_bytecode",
         "//tensorflow/core/tfrt/mlrt/bytecode:executable",
         "//tensorflow/core/tfrt/mlrt/interpreter:attribute_span",
-        "//tensorflow/tsl/platform:resource_loader",
         "@com_google_googletest//:gtest_main",
         "@llvm-project//mlir:FuncDialect",
         "@llvm-project//mlir:Parser",
+        "@llvm-project//mlir:Support",
+        "@local_tsl//tsl/platform:resource_loader",
+        "@local_tsl//tsl/platform:status_matchers",
+        "@local_tsl//tsl/platform:test",
     ],
 )
 
@@ -52,7 +56,8 @@ cc_library(
     srcs = ["test_utils.cc"],
     hdrs = ["test_utils.h"],
     deps = [
-        "//learning/brain/experimental/tfrt/native_lowering/kernels:sync_context",
+        # copybara:uncomment "//learning/brain/experimental/tfrt/native_lowering/stubs:tfrt_native_lowering_impl",
+        "@com_google_absl//absl/status:statusor",
         "//tensorflow/core:core_cpu_base",
         "//tensorflow/core:framework",
         "//tensorflow/core:protos_all_cc",
@@ -62,9 +67,9 @@ cc_library(
         "//tensorflow/core/tfrt/mlrt/interpreter:context",
         "//tensorflow/core/tfrt/mlrt/interpreter:interpreter_testutil",
         "//tensorflow/core/tfrt/mlrt/interpreter:value",
+        "//tensorflow/core/tfrt/stubs:tfrt_native_lowering_stub",
         "//tensorflow/core/tfrt/utils:tensor_util",
-        "//tensorflow/tsl/platform:errors",
-        "@com_google_absl//absl/status:statusor",
+        "@local_tsl//tsl/platform:errors",
         "@tf_runtime//:hostcontext",
         "@tf_runtime//:tensor",
     ],

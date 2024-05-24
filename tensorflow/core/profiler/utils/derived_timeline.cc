@@ -26,6 +26,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/optional.h"
+#include "xla/tsl/util/stats_calculator.h"
 #include "tensorflow/core/lib/gtl/map_util.h"
 #include "tensorflow/core/profiler/protobuf/xplane.pb.h"
 #include "tensorflow/core/profiler/utils/gpu_event_stats.h"
@@ -37,13 +38,12 @@ limitations under the License.
 #include "tensorflow/core/profiler/utils/xplane_schema.h"
 #include "tensorflow/core/profiler/utils/xplane_utils.h"
 #include "tensorflow/core/profiler/utils/xplane_visitor.h"
-#include "tensorflow/tsl/profiler/convert/xla_op_utils.h"
-#include "tensorflow/tsl/profiler/utils/group_events.h"
-#include "tensorflow/tsl/profiler/utils/tf_op_utils.h"
-#include "tensorflow/tsl/profiler/utils/tf_xplane_visitor.h"
-#include "tensorflow/tsl/profiler/utils/timespan.h"
-#include "tensorflow/tsl/profiler/utils/tpu_xplane_utils.h"
-#include "tensorflow/tsl/util/stats_calculator.h"
+#include "tsl/profiler/convert/xla_op_utils.h"
+#include "tsl/profiler/utils/group_events.h"
+#include "tsl/profiler/utils/tf_op_utils.h"
+#include "tsl/profiler/utils/tf_xplane_visitor.h"
+#include "tsl/profiler/utils/timespan.h"
+#include "tsl/profiler/utils/tpu_xplane_utils.h"
 
 namespace tensorflow {
 namespace profiler {
@@ -393,10 +393,12 @@ void DeriveEventsFromHostTrace(
         device_event.AddStatValue(group_id_stat_metadata, group_id);
         device_event.AddStatValue(num_launches_stat_metadata,
                                   group_info.stat.count());
-        device_event.AddStatValue(max_launch_time_us_stat_metadata,
-                                  PicoToMicro(group_info.stat.max()));
-        device_event.AddStatValue(avg_launch_time_us_stat_metadata,
-                                  PicoToMicro(group_info.stat.avg()));
+        device_event.AddStatValue(
+            max_launch_time_us_stat_metadata,
+            tsl::profiler::PicoToMicro(group_info.stat.max()));
+        device_event.AddStatValue(
+            avg_launch_time_us_stat_metadata,
+            tsl::profiler::PicoToMicro(group_info.stat.avg()));
       }
     }
   }

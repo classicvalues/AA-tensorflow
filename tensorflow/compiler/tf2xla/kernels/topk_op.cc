@@ -16,9 +16,9 @@ limitations under the License.
 #include "tensorflow/compiler/tf2xla/type_util.h"
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
-#include "tensorflow/compiler/xla/client/lib/sorting.h"
-#include "tensorflow/compiler/xla/client/xla_builder.h"
-#include "tensorflow/compiler/xla/literal.h"
+#include "xla/client/lib/sorting.h"
+#include "xla/client/xla_builder.h"
+#include "xla/literal.h"
 #include "tensorflow/core/framework/kernel_def_builder.h"
 #include "tensorflow/core/framework/types.h"
 
@@ -35,7 +35,7 @@ class TopKOp : public XlaOpKernel {
   }
 
   void Compile(XlaOpKernelContext* context) override {
-    const StatusOr<xla::Shape> input_shape_or = context->InputXlaShape(0);
+    const absl::StatusOr<xla::Shape> input_shape_or = context->InputXlaShape(0);
     OP_REQUIRES_OK(context, input_shape_or.status());
     const xla::Shape& input_shape = *input_shape_or;
     int last_dim = input_shape.dimensions_size() - 1;

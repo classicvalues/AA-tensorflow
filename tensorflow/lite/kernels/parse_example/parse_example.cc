@@ -430,7 +430,7 @@ void CopySparseBufferToTensor(tf::DataType dtype, size_t offset,
   }
 }
 
-inline void CopyToBuffer(tf::gtl::ArraySlice<tstring> vec, char* tensor_buffer,
+inline void CopyToBuffer(absl::Span<const tstring> vec, char* tensor_buffer,
                          int num_examples, int batch_size,
                          int elements_per_stride) {
   int i = 0, k = 0;
@@ -454,7 +454,7 @@ inline void CopyToBuffer(tf::gtl::ArraySlice<tstring> vec, char* tensor_buffer,
 
 Status FastParseExampleLite(
     const FastParseExampleConfig& config, const TfLiteTensor* serialized,
-    tf::gtl::ArraySlice<tstring> example_names, bool* quick_filter,
+    absl::Span<const tstring> example_names, bool* quick_filter,
     int quick_filter_size, const std::unique_ptr<ConfigIndex>& config_index,
     int config_index_size, SeededHasher* hasher, TfLiteResult* result,
     std::map<absl::string_view, int>& stats, TfLiteContext* context) {
@@ -467,7 +467,7 @@ Status FastParseExampleLite(
   std::vector<SparseBuffer> varlen_dense_buffers(config.dense.size());
   Status status_of_minibatch;
   for (size_t e = 0; e < count; ++e) {
-    Status status_of_minibatch = FastParseSerializedExample(
+    status_of_minibatch = FastParseSerializedExample(
         GetString(serialized, e),
         (!example_names.empty() ? example_names[e] : "<unknown>"), e, config,
         quick_filter, quick_filter_size, config_index, config_index_size,
@@ -490,9 +490,9 @@ Status FastParseExampleLite(
     TfLiteTensor* indices = result->sparse_indices[d];
     TfLiteTensor* values = result->sparse_values[d];
 
-    TfLiteTensor* dense_shape = result->sparse_shapes[d];
-    auto* dense_shape_ptr = reinterpret_cast<int64_t*>(dense_shape->data.raw);
-    dense_shape_ptr[1] = max_num_features;
+    TfLiteTensor* sparse_shape = result->sparse_shapes[d];
+    auto* sparse_shape_ptr = reinterpret_cast<int64_t*>(sparse_shape->data.raw);
+    sparse_shape_ptr[1] = max_num_features;
 
     TfLiteIntArray* index_shape = TfLiteIntArrayCreate(2);
     index_shape->data[0] = total_num_features;
@@ -633,7 +633,7 @@ Status FastParseExampleLite(
         memcpy(tensor_buffer + sizeof(int32_t) * (i + 1), &offset_i,
                sizeof(int32_t));
       }
-      tf::gtl::ArraySlice<tstring> slice(vec.data(), vec.size());
+      absl::Span<const tstring> slice(vec.data(), vec.size());
       CopyToBuffer(slice, tensor_buffer + start, count, batch_size,
                    elements_per_stride);
     }

@@ -51,7 +51,8 @@ using test_utils::TestTwoDelegates;
 namespace {
 
 TEST_F(TestDelegate, NullDelegate) {
-  EXPECT_EQ(interpreter_->ModifyGraphWithDelegate(nullptr),
+  TfLiteOpaqueDelegate* delegate = nullptr;
+  EXPECT_EQ(interpreter_->ModifyGraphWithDelegate(delegate),
             kTfLiteDelegateError);
 }
 
@@ -178,14 +179,14 @@ TEST_F(TestDelegate, SetBufferHandleToInput) {
   TfLiteDelegate* delegate = delegate_->get_tf_lite_delegate();
   interpreter_->ModifyGraphWithDelegate(delegate);
 
-  constexpr int kOutputTensorIndex = 0;
-  TfLiteTensor* tensor = interpreter_->tensor(kOutputTensorIndex);
+  constexpr int kInputTensorIndex = 0;
+  TfLiteTensor* tensor = interpreter_->tensor(kInputTensorIndex);
   ASSERT_EQ(tensor->delegate, nullptr);
   ASSERT_EQ(tensor->buffer_handle, kTfLiteNullBufferHandle);
 
   TfLiteBufferHandle handle = AllocateBufferHandle();
   TfLiteStatus status =
-      interpreter_->SetBufferHandle(kOutputTensorIndex, handle, delegate);
+      interpreter_->SetBufferHandle(kInputTensorIndex, handle, delegate);
   ASSERT_EQ(status, kTfLiteOk);
   EXPECT_EQ(tensor->delegate, delegate);
   EXPECT_EQ(tensor->buffer_handle, handle);
@@ -389,6 +390,7 @@ TEST_F(TestDelegate, TestCopyFromBufferInvoke) {
 }
 
 TEST_F(TestDelegate, TestCopyFromBuffer) {
+  interpreter_->Invoke();
   delegate_ = std::unique_ptr<SimpleDelegate>(new SimpleDelegate({0, 1, 2}));
   TfLiteDelegate* delegate = delegate_->get_tf_lite_delegate();
   interpreter_->ModifyGraphWithDelegate(delegate);
@@ -445,6 +447,9 @@ struct OpaqueTestDelegate {
     delegate_state->delegate_prepared = true;
 
     TfLiteRegistration registration{};
+    registration.registration_external = TfLiteOperatorCreate(
+        kTfLiteBuiltinDelegate, "OpaqueTestDelegate delegate kernel", 1);
+
     registration.prepare = [](TfLiteContext* context,
                               TfLiteNode* node) -> TfLiteStatus {
       return kTfLiteOk;
@@ -1125,10 +1130,10 @@ class TestDelegateWithDynamicTensors : public ::testing::Test {
   TfLiteDelegate delegate_;
 };
 
-TfLiteRegistrationExternal* CreateTfLiteRegistrationExternal() {
-  auto registration = TfLiteRegistrationExternalCreate(
-      kTfLiteBuiltinDelegate, "OpaqueDelegateKernel", 1);
-  TfLiteRegistrationExternalSetPrepare(
+TfLiteOperator* CreateTfLiteOperator() {
+  auto registration =
+      TfLiteOperatorCreate(kTfLiteBuiltinDelegate, "OpaqueDelegateKernel", 1);
+  TfLiteOperatorSetPrepare(
       registration,
       [](TfLiteOpaqueContext* context,
          TfLiteOpaqueNode* opaque_node) -> TfLiteStatus {
@@ -1181,7 +1186,7 @@ class TestOpaqueDelegateBuilderWithDynamicTensors
       TfLiteIntArray* execution_plan;
       TfLiteOpaqueContextGetExecutionPlan(opaque_context, &execution_plan);
       return TfLiteOpaqueContextReplaceNodeSubsetsWithDelegateKernels(
-          opaque_context, CreateTfLiteRegistrationExternal(), execution_plan,
+          opaque_context, CreateTfLiteOperator(), execution_plan,
           opaque_delegate);
     };
     delegate_external_.flags = kTfLiteDelegateFlagsNone;
@@ -1484,7 +1489,8 @@ TEST_P(TestFP16Delegation, NonDelegatedInterpreterWorks) {
 }
 
 TEST_F(TestFP16Delegation, NullDelegate) {
-  EXPECT_EQ(interpreter_->ModifyGraphWithDelegate(nullptr),
+  TfLiteOpaqueDelegate* delegate = nullptr;
+  EXPECT_EQ(interpreter_->ModifyGraphWithDelegate(delegate),
             kTfLiteDelegateError);
   // Verify that resulting interpreter still works, despite null delegate.
   ASSERT_EQ(interpreter_->AllocateTensors(), kTfLiteOk);

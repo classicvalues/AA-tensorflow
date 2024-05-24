@@ -27,16 +27,17 @@ the same way with eager and graph execution.
 *Guides*
 
 * [TensorFlow v2.x](https://www.tensorflow.org/guide/distributed_training)
-* [TensorFlow v1.x](https://github.com/tensorflow/docs/blob/master/site/en/r1/guide/distribute_strategy.ipynb)
+* [TensorFlow
+v1.x](https://github.com/tensorflow/docs/blob/master/site/en/r1/guide/distribute_strategy.ipynb)
 
 *Tutorials*
 
-* [Distributed Training Tutorials](https://www.tensorflow.org/tutorials/distribute/)
+* [Distributed Training
+Tutorials](https://www.tensorflow.org/tutorials/distribute/)
 
   The tutorials cover how to use `tf.distribute.Strategy` to do distributed
-  training with native Keras APIs, custom training loops,
-  and Estimator APIs. They also cover how to save/load model when using
-  `tf.distribute.Strategy`.
+  training with native Keras APIs, and custom training loops.
+  They also cover how to save/load model when using `tf.distribute.Strategy`.
 
 *Glossary*
 
@@ -214,6 +215,7 @@ from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor as tensor_lib
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import array_ops
@@ -538,7 +540,7 @@ def in_cross_replica_context():
 
 
 @tf_export("distribute.get_strategy")
-def get_strategy():
+def get_strategy() -> "StrategyBase":
   """Returns the current `tf.distribute.Strategy` object.
 
   Typically only used in a cross-replica context:
@@ -764,6 +766,9 @@ class _CurrentDistributionContext(object):
     return self._context.strategy
 
   def __exit__(self, exception_type, exception_value, traceback):
+    if hasattr(self._context.strategy.extended, "_lazy_variable_tracker"):
+      self._context.strategy.extended._lazy_variable_tracker.initialize_all()
+
     if self._same_scope_again_count > 0:
       self._same_scope_again_count -= 1
       return
@@ -1094,10 +1099,6 @@ class StrategyBase(object):
   * To use it with Keras `compile`/`fit`,
     [please
     read](https://www.tensorflow.org/guide/distributed_training#using_tfdistributestrategy_with_keras).
-  * You may pass descendant of `tf.distribute.Strategy` to
-    `tf.estimator.RunConfig` to specify how a `tf.estimator.Estimator`
-    should distribute its computation. See
-    [guide](https://www.tensorflow.org/guide/distributed_training#using_tfdistributestrategy_with_estimator_limited_support).
   * Otherwise, use `tf.distribute.Strategy.scope` to specify that a
     strategy should be used when building an executing your model.
     (This puts you in the "cross-replica context" for this strategy, which
@@ -1175,9 +1176,6 @@ class StrategyBase(object):
   def __init__(self, extended):
     self._extended = extended
 
-    # Flag that is used to indicate whether distribution strategy is used with
-    # Estimator. This is required for backward compatibility of loss scaling
-    # when using v1 optimizer with estimator.
     self._scale_loss_for_estimator = False
 
     if not hasattr(extended, "_retrace_functions_for_each_device"):
@@ -3926,7 +3924,7 @@ class ReplicaContextV1(ReplicaContextBase):
 
 def _batch_reduce_destination(x):
   """Returns the destinations for batch all-reduce."""
-  if isinstance(x, ops.Tensor):
+  if isinstance(x, tensor_lib.Tensor):
     # If this is a one device strategy.
     return x.device
   else:

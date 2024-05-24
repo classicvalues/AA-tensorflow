@@ -20,8 +20,8 @@ limitations under the License.
 #include "tensorflow/compiler/tf2xla/type_util.h"
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
 #include "tensorflow/compiler/tf2xla/xla_op_registry.h"
-#include "tensorflow/compiler/xla/client/lib/constants.h"
-#include "tensorflow/compiler/xla/client/xla_builder.h"
+#include "xla/client/lib/constants.h"
+#include "xla/client/xla_builder.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/types.pb.h"
 
@@ -42,7 +42,7 @@ class StochasticCastToInt : public XlaOpKernel {
   void Compile(XlaOpKernelContext* ctx) override {
     TensorShape shape;
     shape = ctx->InputShape(kInputIndex);
-    StatusOr<xla::XlaOp> randoms_or = BuildUniformRandoms(
+    absl::StatusOr<xla::XlaOp> randoms_or = BuildUniformRandoms(
         ctx, from_type_, device_type_string_, shape, xla::Zero, xla::One);
     OP_REQUIRES_OK(ctx, randoms_or.status());
     xla::XlaOp input = ctx->Input(kInputIndex);

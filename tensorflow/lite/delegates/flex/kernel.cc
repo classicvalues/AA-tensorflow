@@ -85,7 +85,7 @@ class OpInputs {
     }
     forwardable_.resize(inputs_.size());
   }
-  ~OpInputs() {}
+  ~OpInputs() = default;
 
   int Size() const { return inputs_.size(); }
 
@@ -155,14 +155,14 @@ class OpOutputs {
 
   int TfLiteIndex(int i) const { return outputs_[i]; }
 
-  tensorflow::gtl::InlinedVector<tensorflow::Tensor, 2>* GetTensors() {
+  absl::InlinedVector<tensorflow::Tensor, 2UL>* GetTensors() {
     return &vector_;
   }
 
  private:
   std::vector<int> outputs_;
   std::vector<bool> subgraph_outputs_;
-  tensorflow::gtl::InlinedVector<tensorflow::Tensor, 2> vector_;
+  absl::InlinedVector<tensorflow::Tensor, 2UL> vector_;
 };
 
 // This struct holds information such as tensor lifecycle and BufferMap which
@@ -237,7 +237,17 @@ class OpNode {
         tensorflow::OpRegistry::Global()->LookUp(nodedef_.op(), &op_reg_data_));
     AddDefaultsToNodeDef(op_reg_data_->op_def, &nodedef_);
 
-    return ::tensorflow::OkStatus();
+    // Force disable the use of inter op parallelism to prevent deadlocks in
+    // Tensorflow Function Library Runtime when only one thread is allowed.
+    // This changes the threadpool that is used by TF's data ops by passing it
+    // to the CapturedFunction instantiate function.
+    //
+    // It should be ok to remove this when/if the tensorflow::Executor::Run
+    // function is changed not to call the RunAsync function and wait on its
+    // completion. See b/304799442 for more context.
+    (*nodedef_.mutable_attr())["use_inter_op_parallelism"].set_b(false);
+
+    return absl::OkStatus();
   }
 
   tensorflow::Status BuildOpKernelRunner(
@@ -248,12 +258,12 @@ class OpNode {
                             name_, inputs_.Size(), /*attr_builder=*/
                             [this](tensorflow::AttrValueMap* attr_value_map) {
                               *attr_value_map = nodedef_.attr();
-                              return ::tensorflow::OkStatus();
+                              return absl::OkStatus();
                             },
                             *eager_context->pflr(),
                             eager_context->local_device_mgr()->HostCPU()));
 
-    return ::tensorflow::OkStatus();
+    return absl::OkStatus();
   }
 
   tensorflow::Status BuildOpKernelInputs(
@@ -288,7 +298,7 @@ class OpNode {
       run_state->input_tf_tensor_values[i].tensor =
           &run_state->input_tf_tensors[i];
     }
-    return ::tensorflow::OkStatus();
+    return absl::OkStatus();
   }
 
   // Returns whether an output tensor should be preserved in the buffer map by
@@ -365,7 +375,7 @@ class OpNode {
         }
       }
     }
-    return ::tensorflow::OkStatus();
+    return absl::OkStatus();
   }
 
  private:
@@ -438,7 +448,7 @@ tensorflow::Status DelegateKernel::ExecuteOpKernelRunner(
 }
 
 DelegateKernel::DelegateKernel() : op_data_(new OpData) {}
-DelegateKernel::~DelegateKernel() {}
+DelegateKernel::~DelegateKernel() = default;
 
 TfLiteStatus DelegateKernel::Init(TfLiteContext* context,
                                   const TfLiteDelegateParams* params) {
@@ -572,20 +582,24 @@ TfLiteStatus DelegateKernel::Prepare(TfLiteContext* context, TfLiteNode* node) {
     tensor_ref_count[tensor_index] += 2;
   }
 
-  const bool shapes_are_valid =
-      (ValidateOutputTensorShapeConsistency(context) == kTfLiteOk);
-  if (shapes_are_valid) {
-    TFLITE_LOG(tflite::TFLITE_LOG_INFO,
-               "FlexDelegate: All tensor shapes are consistent.");
-  } else {
-    TFLITE_LOG(tflite::TFLITE_LOG_WARNING,
-               "FlexDelegate: Some tensor shapes are inconsistent.");
+  // Output shapes which may have initially been inferable may no longer be
+  // after ResizeInputTensor has been called, so it must be checked again.
+  if (shapes_are_valid_) {
+    shapes_are_valid_ =
+        (ValidateOutputTensorShapeConsistency(context) == kTfLiteOk);
+    if (shapes_are_valid_) {
+      TFLITE_LOG(tflite::TFLITE_LOG_INFO,
+                 "FlexDelegate: All tensor shapes are consistent.");
+    } else {
+      TFLITE_LOG(tflite::TFLITE_LOG_WARNING,
+                 "FlexDelegate: Some tensor shapes are inconsistent.");
+    }
   }
 
   // All output tensors are allocated by TensorFlow, so we mark them as
   // kTfLiteDynamic.
   for (auto tensor_index : op_data_->subgraph_outputs) {
-    if (!shapes_are_valid) {
+    if (!shapes_are_valid_) {
       SetTensorToDynamic(&context->tensors[tensor_index]);
     }
     ++tensor_ref_count[tensor_index];

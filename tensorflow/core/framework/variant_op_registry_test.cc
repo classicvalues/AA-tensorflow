@@ -24,7 +24,7 @@ limitations under the License.
 
 #include "tensorflow/core/framework/variant_op_registry.h"
 
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/types.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
@@ -45,7 +45,7 @@ struct VariantValue {
       return errors::InvalidArgument("early exit zeros_like!");
     }
     v_out->value = 1;  // CPU
-    return OkStatus();
+    return absl::OkStatus();
   }
   static Status GPUZerosLikeFn(OpKernelContext* ctx, const VariantValue& v,
                                VariantValue* v_out) {
@@ -53,7 +53,7 @@ struct VariantValue {
       return errors::InvalidArgument("early exit zeros_like!");
     }
     v_out->value = 2;  // GPU
-    return OkStatus();
+    return absl::OkStatus();
   }
   static Status CPUAddFn(OpKernelContext* ctx, const VariantValue& a,
                          const VariantValue& b, VariantValue* out) {
@@ -61,7 +61,7 @@ struct VariantValue {
       return errors::InvalidArgument("early exit add!");
     }
     out->value = a.value + b.value;  // CPU
-    return OkStatus();
+    return absl::OkStatus();
   }
   static Status GPUAddFn(OpKernelContext* ctx, const VariantValue& a,
                          const VariantValue& b, VariantValue* out) {
@@ -69,14 +69,14 @@ struct VariantValue {
       return errors::InvalidArgument("early exit add!");
     }
     out->value = -(a.value + b.value);  // GPU
-    return OkStatus();
+    return absl::OkStatus();
   }
   static Status CPUToGPUCopyFn(
       const VariantValue& from, VariantValue* to,
       const std::function<Status(const Tensor&, Tensor*)>& copier) {
     TF_RETURN_IF_ERROR(copier(Tensor(), nullptr));
     to->value = 0xdeadbeef;
-    return OkStatus();
+    return absl::OkStatus();
   }
   bool early_exit;
   int value;
@@ -170,7 +170,7 @@ TEST(VariantOpCopyToGPURegistryTest, TestBasic) {
   auto dummy_copy_fn = [&dummy_executed](const Tensor& from,
                                          Tensor* to) -> Status {
     dummy_executed = true;
-    return OkStatus();
+    return absl::OkStatus();
   };
   TF_EXPECT_OK((*copy_to_gpu_fn)(v, &v_out, dummy_copy_fn));
   EXPECT_TRUE(dummy_executed);

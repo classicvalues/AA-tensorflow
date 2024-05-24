@@ -35,12 +35,12 @@ from tensorflow.python.distribute.cluster_resolver import cluster_resolver as cl
 from tensorflow.python.distribute.v1 import input_lib as input_lib_v1
 from tensorflow.python.eager import backprop
 from tensorflow.python.eager import context
-from tensorflow.python.estimator import run_config
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import device as tf_device
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import control_flow_ops
@@ -53,14 +53,14 @@ from tensorflow.python.ops import variables
 from tensorflow.python.platform import test
 from tensorflow.python.training import training_util
 
-CHIEF = run_config.TaskType.CHIEF
-WORKER = run_config.TaskType.WORKER
-PS = run_config.TaskType.PS
+CHIEF = 'chief'
+WORKER = 'worker'
+PS = 'ps'
 
 
 def _get_replica_id_integer():
   replica_id = distribute_lib.get_replica_context().replica_id_in_sync_group
-  if isinstance(replica_id, ops.Tensor):
+  if isinstance(replica_id, tensor.Tensor):
     replica_id = tensor_util.constant_value(replica_id)
   return replica_id
 

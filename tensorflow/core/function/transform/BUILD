@@ -27,7 +27,7 @@ pytype_strict_library(
         "//tensorflow/python/framework:func_graph",
         "//tensorflow/python/framework:function_def_to_graph",
         "//tensorflow/python/framework:ops",
-        "//tensorflow/python/framework:tensor_spec",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/ops:custom_gradient",
         "//tensorflow/python/ops:default_gradient",
         "//tensorflow/python/ops:handle_data_util",
@@ -43,6 +43,8 @@ py_strict_test(
     tags = ["no_oss"],  # TODO(b/219089812)
     deps = [
         ":transform",
+        "@absl_py//absl/testing:parameterized",
+        #internal proto upb dep
         "//tensorflow/core/function/testing:test_pass_py",
         "//tensorflow/python/eager:def_function",
         "//tensorflow/python/framework:constant_op",
@@ -57,6 +59,5 @@ py_strict_test(
         "//tensorflow/python/platform:client_testlib",
         "//tensorflow/python/saved_model:load",
         "//tensorflow/python/saved_model:save",
-        "@absl_py//absl/testing:parameterized",
     ],
 )

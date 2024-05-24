@@ -89,13 +89,14 @@ distribute_py_strict_test(
     python_version = "PY3",
     shard_count = 50,
     tags = [
-        "multi_gpu",
+        # "multi_gpu", # TODO(b/287692888): re-enable once the 2gpu test passes.
         "no_oss",  # TODO(b/214432000): Very flaky under Docker
         "no_pip",
         "noasan",  # TODO(b/171040359): Flaky timeout, even if maximum shards
         "notpu",
         "notsan",  # TODO(b/171040359): Flaky timeout, even if maximum shards
     ],
+    xla_enable_strict_auto_jit = False,  # TODO(b/291174864)
     xla_tags = [
         "no_cuda_asan",  # Race condition on async test
     ],
@@ -152,6 +153,7 @@ py_strict_library(
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
         "//tensorflow/python/framework:ops",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:check_ops",
         "//tensorflow/python/ops:math_ops",
@@ -167,7 +169,7 @@ tf_py_strict_test(
     name = "fault_tolerance_test",
     srcs = ["fault_tolerance_test.py"],
     python_version = "PY3",
-    shard_count = 40,  # = number of tests, so one shard = one test
+    shard_count = 41,  # = number of tests, so one shard = one test
     tags = [
         "no_oss",  # TODO(b/219580021)
         "noasan",  # Multi-process runner does not work with test sanitizers
@@ -175,10 +177,16 @@ tf_py_strict_test(
         "nomsan",
     ],
     deps = [
+        ":cluster_coordinator",
         ":fault_tolerance_test_base",
         "//tensorflow/python/compat:v2_compat",
         "//tensorflow/python/distribute:multi_process_runner",
+        "//tensorflow/python/distribute:multi_worker_test_base",
+        "//tensorflow/python/distribute:parameter_server_strategy_v2",
+        "//tensorflow/python/distribute/cluster_resolver:base_cluster_resolver_py",
         "//tensorflow/python/eager:test",
+        "//tensorflow/python/training:coordinator",
+        "//tensorflow/python/training:server_lib",
     ],
 )
 
@@ -192,6 +200,7 @@ tf_py_strict_test(
         "no_oss",  # TODO(b/219580021)
         "noasan",  # Multi-process runner does not work with test sanitizers
         "nomac",  # TODO(b/177065434)
+        "nomsan",  # TODO(b/290211396)
     ],
     deps = [
         ":cluster_coordinator",
@@ -209,7 +218,7 @@ py_strict_library(
     srcs_version = "PY3",
     deps = [
         "//tensorflow/python/eager:monitoring",
-        "//tensorflow/python/util:tf_decorator",
+        "//tensorflow/python/util:tf_contextlib",
     ],
 )
 

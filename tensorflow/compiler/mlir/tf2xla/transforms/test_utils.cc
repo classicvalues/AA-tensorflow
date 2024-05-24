@@ -23,7 +23,7 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/register_common_dialects.h"
 #include "tensorflow/compiler/mlir/tensorflow/dialect_registration.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/serialize_mlir_module_utils.h"
-#include "tensorflow/tsl/platform/statusor.h"
+#include "tsl/platform/statusor.h"
 
 namespace mlir {
 namespace mhlo {
@@ -35,7 +35,7 @@ using ::mlir::ModuleOp;
 using ::mlir::OwningOpRef;
 using ::tsl::StatusOr;
 
-StatusOr<OwningOpRef<ModuleOp>> GetMlirModuleFromString(
+absl::StatusOr<OwningOpRef<ModuleOp>> GetMlirModuleFromString(
     absl::string_view module_string, MLIRContext* context) {
   DialectRegistry mlir_registry;
   RegisterCommonToolingDialects(mlir_registry);

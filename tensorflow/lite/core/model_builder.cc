@@ -17,11 +17,17 @@ limitations under the License.
 #include <stddef.h>
 #include <stdint.h>
 
+#include <algorithm>
+#include <cstring>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
 
-#include "flatbuffers/flatbuffers.h"  // from @flatbuffers
+#include "flatbuffers/base.h"  // from @flatbuffers
+#include "flatbuffers/buffer.h"  // from @flatbuffers
+#include "flatbuffers/vector.h"  // from @flatbuffers
+#include "flatbuffers/verifier.h"  // from @flatbuffers
 #include "tensorflow/lite/allocation.h"
 #include "tensorflow/lite/core/api/error_reporter.h"
 #include "tensorflow/lite/core/api/verifier.h"
@@ -108,16 +114,25 @@ std::unique_ptr<FlatBufferModel> FlatBufferModel::VerifyAndBuildFromBuffer(
 
 #if FLATBUFFERS_LITTLEENDIAN == 0
 
-void FlatBufferModel::ByteSwapSerializedModel(std::string* serialized_model) {
+void FlatBufferModel::ByteSwapSerializedModel(std::string* serialized_model,
+                                              bool from_big_endian) {
   const uint8_t* buffer =
       reinterpret_cast<const uint8_t*>(serialized_model->c_str());
   const tflite::Model* input_model = tflite::GetModel(buffer);
-  ByteSwapTFLiteModel(input_model);
+  ByteSwapTFLiteModel(input_model, from_big_endian);
 }
 
 void FlatBufferModel::ByteSwapBuffer(int8_t tensor_type, size_t buffer_size,
-                                     uint8_t* buffer) {
+                                     uint8_t* buffer, bool from_big_endian) {
   switch (tensor_type) {
+    case tflite::TensorType_STRING: {
+      auto bp = reinterpret_cast<int32_t*>(buffer);
+      int num_of_strings =
+          from_big_endian ? bp[0] : flatbuffers::EndianSwap(bp[0]);
+      for (int i = 0; i < num_of_strings + 2; i++)
+        bp[i] = flatbuffers::EndianSwap(bp[i]);
+      break;
+    }
     // 16-bit types
     case tflite::TensorType_FLOAT16:
     case tflite::TensorType_INT16:
@@ -152,7 +167,8 @@ void FlatBufferModel::ByteSwapBuffer(int8_t tensor_type, size_t buffer_size,
   }
 }
 
-void FlatBufferModel::ByteSwapTFLiteModel(const tflite::Model* tfl_model) {
+void FlatBufferModel::ByteSwapTFLiteModel(const tflite::Model* tfl_model,
+                                          bool from_big_endian) {
   bool buffer_swapped[tfl_model->buffers()->size()] = {};
   for (size_t subgraph_idx = 0; subgraph_idx < tfl_model->subgraphs()->size();
        subgraph_idx++) {
@@ -168,7 +184,7 @@ void FlatBufferModel::ByteSwapTFLiteModel(const tflite::Model* tfl_model) {
         if (!buffer_ || !buffer_->data()) continue;
         auto* buffer = buffer_->data();
         uint8_t* buff_ = const_cast<uint8_t*>(buffer->data());
-        ByteSwapBuffer(tensor->type(), buffer->size(), buff_);
+        ByteSwapBuffer(tensor->type(), buffer->size(), buff_, from_big_endian);
         buffer_swapped[tensor->buffer()] = true;
       }
     }
@@ -176,21 +192,25 @@ void FlatBufferModel::ByteSwapTFLiteModel(const tflite::Model* tfl_model) {
 }
 
 std::unique_ptr<FlatBufferModel> FlatBufferModel::ByteConvertModel(
-    std::unique_ptr<FlatBufferModel> model, ErrorReporter* error_reporter) {
+    std::unique_ptr<FlatBufferModel> model, ErrorReporter* error_reporter,
+    bool from_big_endian) {
   if (model == nullptr) return model;
   auto tfl_model = model->GetModel();
   if (tfl_model->subgraphs()->size() == 0) return model;
   if (tfl_model->subgraphs()->Get(0)->tensors()->size() == 0) return model;
-  return ByteSwapFlatBufferModel(std::move(model), error_reporter);
+  if (tfl_model->buffers()->size() < 2) return model;
+  return ByteSwapFlatBufferModel(std::move(model), error_reporter,
+                                 from_big_endian);
 }
 
 std::unique_ptr<FlatBufferModel> FlatBufferModel::ByteSwapFlatBufferModel(
-    std::unique_ptr<FlatBufferModel> model, ErrorReporter* error_reporter) {
+    std::unique_ptr<FlatBufferModel> model, ErrorReporter* error_reporter,
+    bool from_big_endian) {
   FlatBufferModel* modelp = model.release();
   auto tflite_model = modelp->GetModel();
   auto copied_model = std::make_unique<tflite::ModelT>();
   tflite_model->UnPackTo(copied_model.get(), nullptr);
-  ByteSwapTFLiteModelT(copied_model.get());
+  ByteSwapTFLiteModelT(copied_model.get(), from_big_endian);
   std::unique_ptr<flatbuffers::FlatBufferBuilder> builder(
       new flatbuffers::FlatBufferBuilder());
   auto packed_model = tflite::Model::Pack(*builder, copied_model.get());
@@ -201,7 +221,8 @@ std::unique_ptr<FlatBufferModel> FlatBufferModel::ByteSwapFlatBufferModel(
       builder_->GetSize(), error_reporter);
 }
 
-void FlatBufferModel::ByteSwapTFLiteModelT(tflite::ModelT* tfl_modelt) {
+void FlatBufferModel::ByteSwapTFLiteModelT(tflite::ModelT* tfl_modelt,
+                                           bool from_big_endian) {
   size_t bytes_per_elem = 0;
   bool buffer_swapped[tfl_modelt->buffers.size()] = {};
   for (size_t subgraph_idx = 0; subgraph_idx < tfl_modelt->subgraphs.size();
@@ -214,7 +235,7 @@ void FlatBufferModel::ByteSwapTFLiteModelT(tflite::ModelT* tfl_modelt) {
         const auto* buffer = &(tfl_modelt->buffers[tensor->buffer].get()->data);
         if (buffer && buffer->data()) {
           uint8_t* buff_ = const_cast<uint8_t*>(buffer->data());
-          ByteSwapBuffer(tensor->type, buffer->size(), buff_);
+          ByteSwapBuffer(tensor->type, buffer->size(), buff_, from_big_endian);
           buffer_swapped[tensor->buffer] = true;
         }
       }
@@ -228,15 +249,13 @@ void FlatBufferModel::ValidateModelBuffers(ErrorReporter* error_reporter) {
   auto buffers = model_->buffers();
   if (buffers && buffers->size() > 0) {
     auto first_buffer = buffers->Get(0);
-    if (first_buffer && first_buffer->data()) {
-      if (first_buffer->data()->size() != 0) {
-        // Note the 0th entry of this array must be an empty buffer (sentinel).
-        // This is a convention so that tensors without a buffer can provide 0
-        // as their buffer.
-        TF_LITE_REPORT_ERROR(
-            error_reporter,
-            "The 0th entry of the model buffer must be an empty buffer.");
-      }
+    if (first_buffer && first_buffer->size() != 0) {
+      // Note the 0th entry of this array must be an empty buffer (sentinel).
+      // This is a convention so that tensors without a buffer can provide 0
+      // as their buffer.
+      TF_LITE_REPORT_ERROR(
+          error_reporter,
+          "The 0th entry of the model buffer must be an empty buffer.");
     }
   }
 }
@@ -262,23 +281,27 @@ std::unique_ptr<FlatBufferModel> FlatBufferModel::VerifyAndBuildFromAllocation(
     return nullptr;
   }
 
-  // Only run validator on models less than 2GB
-  if (allocation->bytes() < flatbuffer_size_max) {
+  {
+    // Flatbuffers can only be smaller than 2GB. The file format appends some
+    // data after the actual flabuffer. We truncate the allocation size to 2GB
+    // so that the verifier doesn't early exit on us.
+    size_t allocation_size =
+        std::min(allocation->bytes(),
+                 static_cast<size_t>(FLATBUFFERS_MAX_BUFFER_SIZE - 1));
     flatbuffers::Verifier base_verifier(
-        reinterpret_cast<const uint8_t*>(allocation->base()),
-        allocation->bytes());
+        reinterpret_cast<const uint8_t*>(allocation->base()), allocation_size);
     if (!VerifyModelBuffer(base_verifier)) {
       TF_LITE_REPORT_ERROR(error_reporter,
                            "The model is not a valid Flatbuffer buffer");
       return nullptr;
     }
-  }
 
-  if (extra_verifier &&
-      !extra_verifier->Verify(static_cast<const char*>(allocation->base()),
-                              allocation->bytes(), error_reporter)) {
-    // The verifier will have already logged an appropriate error message.
-    return nullptr;
+    if (extra_verifier &&
+        !extra_verifier->Verify(static_cast<const char*>(allocation->base()),
+                                allocation_size, error_reporter)) {
+      // The verifier will have already logged an appropriate error message.
+      return nullptr;
+    }
   }
 
   return BuildFromAllocation(std::move(allocation), error_reporter);
@@ -373,6 +396,12 @@ std::map<std::string, std::string> FlatBufferModel::ReadAllMetadata(
 }
 
 bool FlatBufferModel::CheckModelIdentifier() const {
+  if (allocation_->bytes() < 7) {
+    TF_LITE_REPORT_ERROR(
+        error_reporter_,
+        "Model provided must have at least 7 bytes to hold identifier.\n");
+    return false;
+  }
   if (!tflite::ModelBufferHasIdentifier(allocation_->base())) {
     const char* ident = flatbuffers::GetBufferIdentifier(allocation_->base());
     TF_LITE_REPORT_ERROR(

@@ -12,8 +12,7 @@
 #    a watch state.
 # ":debug_node_key" - Defines a struct used for tracking tensors.
 
-load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
-load("//tensorflow:tensorflow.default.bzl", "tf_grpc_cc_dependencies")
+# Placeholder: load py_proto_library
 load(
     "//tensorflow:tensorflow.bzl",
     "check_deps",
@@ -23,6 +22,7 @@ load(
     "tf_copts",
     "tf_cuda_library",
 )
+load("//tensorflow:tensorflow.default.bzl", "tf_grpc_cc_dependencies")
 
 # For platform specific build config
 load(
@@ -30,6 +30,7 @@ load(
     "tf_additional_all_protos",
     "tf_proto_library",
 )
+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],

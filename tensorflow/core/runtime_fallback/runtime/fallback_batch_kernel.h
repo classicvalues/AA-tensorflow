@@ -22,20 +22,23 @@ limitations under the License.
 
 #include "absl/log/check.h"
 #include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/op_requires.h"
 #include "tensorflow/core/framework/resource_mgr.h"
+#include "tensorflow/core/kernels/batch_kernels.h"
 #include "tensorflow/core/kernels/batching_util/adaptive_shared_batch_scheduler.h"
 #include "tensorflow/core/kernels/batching_util/batch_resource_base.h"
+#include "tensorflow/core/kernels/batching_util/batch_scheduler.h"
+#include "tensorflow/core/kernels/batching_util/warmup.h"
 #include "tensorflow/core/lib/core/refcount.h"
 #include "tensorflow/core/lib/core/status.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/random.h"
-#include "tensorflow/tsl/platform/errors.h"
-#include "tensorflow/tsl/platform/status.h"
-#include "tensorflow/tsl/platform/statusor.h"
+#include "tsl/platform/errors.h"
+#include "tsl/platform/status.h"
+#include "tsl/platform/statusor.h"
 #include "tfrt/host_context/resource_context.h"  // from @tf_runtime
-#include "util/task/status_macros.h"
 
 namespace tensorflow {
 namespace tfrt_stub {
@@ -72,7 +75,13 @@ class BatchFunctionFallbackKernelBase : public AsyncOpKernel {
   int32_t batch_timeout_micros_;
   int32_t max_enqueued_batches_;
   std::vector<int32_t> allowed_batch_sizes_;
+  int32 low_priority_max_batch_size_;
+  int32 low_priority_batch_timeout_micros_;
+  int32 low_priority_max_enqueued_batches_;
+  std::vector<int32> low_priority_allowed_batch_sizes_;
+  std::string mixed_priority_policy_;
   bool enable_large_batch_splitting_;
+  bool has_attribute_enable_large_batch_splitting_;
   bool disable_padding_;
 
   // Parameters for adaptive batch scheduler only.
@@ -116,6 +125,11 @@ class BatchFunctionFallbackKernel : public BatchFunctionFallbackKernelBase {
 template <typename BatchResourceType>
 void BatchFunctionFallbackKernel<BatchResourceType>::ComputeAsync(
     OpKernelContext* c, DoneCallback done) {
+  RecordBatchSplitUsage(has_attribute_enable_large_batch_splitting_
+                            ? std::make_optional(enable_large_batch_splitting_)
+                            : std::nullopt,
+                        GetModelName(c));
+  RecordBatchParamNumBatchThreads(num_batch_threads_, GetModelName(c));
   OP_REQUIRES_VALUE(tfrt::ResourceContext * client_graph_resource_context, c,
                     BatchResourceType::GetClientGraphResourceContext(c));
   OP_REQUIRES_ASYNC(
@@ -191,10 +205,27 @@ void BatchFunctionFallbackKernel<BatchResourceType>::ComputeAsync(
   } else {
     creator = [this, c]()
         -> absl::StatusOr<tensorflow::core::RefCountPtr<BatchResourceType>> {
+      serving::BatchResourceOptions batch_resource_options;
+      TF_ASSIGN_OR_RETURN(
+          batch_resource_options.mixed_priority_batching_policy,
+          serving::GetMixedPriorityBatchingPolicy(mixed_priority_policy_));
+      batch_resource_options.num_batch_threads = num_batch_threads_;
+      batch_resource_options.max_batch_size = max_batch_size_;
+      batch_resource_options.batch_timeout_micros = batch_timeout_micros_;
+      batch_resource_options.max_enqueued_batches = max_enqueued_batches_;
+      batch_resource_options.allowed_batch_sizes = allowed_batch_sizes_;
+      batch_resource_options.low_priority_max_batch_size =
+          low_priority_max_batch_size_;
+      batch_resource_options.low_priority_batch_timeout_micros =
+          low_priority_batch_timeout_micros_;
+      batch_resource_options.low_priority_max_enqueued_batches =
+          low_priority_max_enqueued_batches_;
+      batch_resource_options.low_priority_allowed_batch_sizes =
+          low_priority_allowed_batch_sizes_;
+
       std::unique_ptr<BatchResourceType> new_resource;
       auto status = BatchResourceType::Create(
-          c, num_batch_threads_, max_batch_size_, batch_timeout_micros_,
-          max_enqueued_batches_, allowed_batch_sizes_, batch_function_,
+          c, batch_resource_options, batch_function_,
           enable_large_batch_splitting_, disable_padding_, &new_resource);
       if (!status.ok()) return status;
       if (c->session_metadata() != nullptr) {
@@ -220,9 +251,18 @@ void BatchFunctionFallbackKernel<BatchResourceType>::ComputeAsync(
           "Provided BEF function doesn't match with BatchResource. Expected:",
           expected_name, " Received:", received_name)),
       done);
-  Status status = (*br)->get()->RegisterInput(
-      random::New64(), c, batcher_queue_,
-      [c]() { return BatchResourceType::CreateBatchTask(c); }, done);
+  const uint64_t guid = random::New64();
+  auto create_batch_task_fn = [c]() {
+    return BatchResourceType::CreateBatchTask(c);
+  };
+  Status status;
+  if (serving::ShouldWarmupAllBatchSizes(c)) {
+    status = (*br)->get()->RegisterWarmupInputs(guid, c, batcher_queue_,
+                                                create_batch_task_fn, done);
+  } else {
+    status = (*br)->get()->RegisterInput(guid, c, batcher_queue_,
+                                         create_batch_task_fn, done);
+  }
   OP_REQUIRES_OK_ASYNC(c, status, done);
   // Assume br calls done, so nothing to do here.
 }

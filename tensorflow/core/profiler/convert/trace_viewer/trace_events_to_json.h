@@ -39,8 +39,8 @@ limitations under the License.
 #include "tensorflow/core/profiler/protobuf/task.pb.h"
 #include "tensorflow/core/profiler/protobuf/trace_events.pb.h"
 #include "tensorflow/core/profiler/protobuf/trace_events_raw.pb.h"
-#include "tensorflow/tsl/platform/protobuf.h"
-#include "tensorflow/tsl/profiler/utils/timespan.h"
+#include "tsl/platform/protobuf.h"
+#include "tsl/profiler/utils/timespan.h"
 
 namespace tensorflow {
 namespace profiler {
@@ -181,7 +181,7 @@ class JsonEventWriter {
         if (event.has_flow_category()) {
           ContextType type = GetSafeContextType(event.flow_category());
           if (type != ContextType::kGeneric && type != ContextType::kLegacy) {
-            const char* category = GetContextTypeString(type);
+            const char* category = tsl::profiler::GetContextTypeString(type);
             output_->Append(R"(,"cat":")", category, R"(")");
           }
         }
@@ -210,7 +210,7 @@ class JsonEventWriter {
         output_->Append(R"(,"id":)", event.flow_id());
         if (event.has_flow_category()) {
           ContextType type = GetSafeContextType(event.flow_category());
-          const char* category = GetContextTypeString(type);
+          const char* category = tsl::profiler::GetContextTypeString(type);
           output_->Append(R"(,"cat":")", category, R"(")");
         }
         switch (event.flow_entry_type()) {

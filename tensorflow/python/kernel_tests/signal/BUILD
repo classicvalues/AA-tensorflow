@@ -1,6 +1,6 @@
 load("//tensorflow:strict.default.bzl", "py_strict_library")
-load("//tensorflow:tensorflow.default.bzl", "cuda_py_strict_test")
 load("//tensorflow:tensorflow.bzl", "py_test")  # @unused
+load("//tensorflow:tensorflow.default.bzl", "cuda_py_strict_test")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -44,16 +44,16 @@ cuda_py_strict_test(
     size = "medium",
     srcs = ["fft_ops_test.py"],
     python_version = "PY3",
-    shard_count = 8,
+    shard_count = 2,
     tags = [
-        "no_cuda11",  # TODO(b/197522782): reenable test after fixing.
         "optonly",
     ],
     deps = [
         "//tensorflow/core:protos_all_py",
         "//tensorflow/python/eager:context",
+        "//tensorflow/python/framework:config",
+        "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
-        "//tensorflow/python/framework:for_generated_wrappers",
         "//tensorflow/python/framework:test_lib",
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:gradient_checker_v2",

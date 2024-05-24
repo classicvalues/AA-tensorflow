@@ -1,9 +1,9 @@
 load("//tensorflow:strict.default.bzl", "py_strict_library", "py_strict_test")
+load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable", "pybind_extension", "replace_with_portable_tf_lib_when_required")
 
 # Utilities for signature_defs in TFLite
 load("//tensorflow/lite:build_def.bzl", "tflite_copts")
 load("//tensorflow/lite:special_rules.bzl", "tflite_portable_test_suite")
-load("//tensorflow:tensorflow.default.bzl", "get_compatible_with_portable", "pybind_extension", "replace_with_portable_tf_lib_when_required")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -68,6 +68,10 @@ pybind_extension(
     srcs = [
         "signature_def_util_wrapper_pybind11.cc",
     ],
+    data = [
+        "_pywrap_signature_def_util_wrapper.pyi",
+    ],
+    enable_stub_generation = True,
     deps = [
         ":signature_def_util",
         "//tensorflow/lite:framework",
@@ -100,6 +104,7 @@ py_strict_test(
     visibility = ["//visibility:public"],
     deps = [
         ":signature_def_utils",
+        #internal proto upb dep
         "//tensorflow:tensorflow_py",
         "//tensorflow/core:protos_all_py",
     ],

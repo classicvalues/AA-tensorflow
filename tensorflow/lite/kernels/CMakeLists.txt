@@ -19,9 +19,10 @@ find_package(nsync REQUIRED)
 find_package(re2 REQUIRED)
 
 # Generate the mutable schema_generated.h header for tests.
-set(SCHEMA_FILE ${TFLITE_SOURCE_DIR}/schema/schema.fbs)
-set(SCHEMA_GENERATED_ROOT ${CMAKE_CURRENT_BINARY_DIR}/schema)
-set(SCHEMA_GENERATED_PATH ${SCHEMA_GENERATED_ROOT}/tensorflow/lite/schema/mutable)
+set(TF_SOURCE_DIR "${TENSORFLOW_SOURCE_DIR}/tensorflow")
+set(SCHEMA_GENERATED_ROOT ${TF_SOURCE_DIR}/compiler/mlir/lite/schema)
+set(SCHEMA_FILE ${SCHEMA_GENERATED_ROOT}/schema.fbs)
+set(SCHEMA_GENERATED_PATH ${SCHEMA_GENERATED_ROOT}/mutable)
 set(SCHEMA_GENERATED_FILE ${SCHEMA_GENERATED_PATH}/schema_generated.h)
 
 # Use the util function in flatbuffer to generate the schema header.
@@ -84,7 +85,7 @@ set(TEST_FRAMEWORK_SRC
   ${TFLITE_SOURCE_DIR}/delegates/nnapi/acceleration_test_list.cc
   ${TFLITE_SOURCE_DIR}/delegates/nnapi/acceleration_test_util.cc
   ${TFLITE_SOURCE_DIR}/profiling/memory_info.cc
-  ${TFLITE_SOURCE_DIR}/schema/schema_conversion_utils.cc
+  ${TFLITE_SOURCE_DIR}/../compiler/mlir/lite/schema/schema_conversion_utils.cc
   ${TFLITE_SOURCE_DIR}/tools/command_line_flags.cc
   ${DELEGATE_PROVIDERS}
   ${TFLITE_SOURCE_DIR}/tools/optimize/model_utils.cc
@@ -92,9 +93,9 @@ set(TEST_FRAMEWORK_SRC
   ${TFLITE_SOURCE_DIR}/tools/optimize/quantization_utils.cc
   ${TFLITE_SOURCE_DIR}/tools/tool_params.cc
   ${TFLITE_SOURCE_DIR}/tools/versioning/op_version.cc
-  ${TF_SOURCE_DIR}/tsl/platform/default/env_time.cc
-  ${TF_SOURCE_DIR}/tsl/platform/default/logging.cc
-  ${TF_SOURCE_DIR}/tsl/platform/default/mutex.cc
+  ${TSL_SOURCE_DIR}/tsl/platform/default/env_time.cc
+  ${TSL_SOURCE_DIR}/tsl/platform/default/logging.cc
+  ${TSL_SOURCE_DIR}/tsl/platform/default/mutex.cc
   internal/test_util.cc
   acceleration_test_util.cc
   acceleration_test_util_internal.cc
@@ -105,6 +106,11 @@ set(TEST_FRAMEWORK_SRC
 if(NOT _TFLITE_ENABLE_NNAPI)
   list(APPEND TEST_FRAMEWORK_SRC
     ${TFLITE_SOURCE_DIR}/nnapi/nnapi_util.cc
+  )
+endif()
+if(NOT TFLITE_ENABLE_GPU)
+  list(APPEND TEST_FRAMEWORK_SRC
+    ${TFLITE_SOURCE_DIR}/tools/versioning/op_signature.cc
   )
 endif()
 

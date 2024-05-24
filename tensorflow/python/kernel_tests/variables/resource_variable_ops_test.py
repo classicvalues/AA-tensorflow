@@ -38,6 +38,7 @@ from tensorflow.python.framework import extension_type
 from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import memory_checker
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor as tensor_lib
 from tensorflow.python.framework import tensor_shape
 from tensorflow.python.framework import tensor_util
 from tensorflow.python.framework import test_ops
@@ -138,6 +139,23 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
                                                constant_op.constant(
                                                    0,
                                                    dtype=dtypes.int32)).run()
+
+  @parameterized.parameters(dtypes.int4, dtypes.uint4)
+  @test_util.disable_xla("b/183567451: XLA doesn't yet support int4")
+  def testInt4(self, dtype):
+    with context.eager_mode():
+      v = resource_variable_ops.ResourceVariable(1, dtype=dtype)
+      self.assertAllEqual(1, v.numpy())
+      v.assign(2)
+      self.assertAllEqual(2, v.numpy())
+
+      if test_util.is_gpu_available():
+        with ops.device("gpu:0"):
+          v = resource_variable_ops.ResourceVariable(3, dtype=dtype)
+          self.assertEqual(
+              "/job:localhost/replica:0/task:0/device:GPU:0", v.device
+          )
+          self.assertAllEqual(3, v.numpy())
 
   @test_util.run_gpu_only
   def testGPUBfloat16(self):
@@ -989,7 +1007,7 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
         result = tape.gradient(out, v)
 
       self.assertAllEqual(out, 5.)
-      self.assertIsInstance(result, ops.Tensor)
+      self.assertIsInstance(result, tensor_lib.Tensor)
       self.assertAllEqual(result, 2.)
 
   def testToFromProtoCachedValue(self):
@@ -1805,7 +1823,7 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
   def testVariableInExtensionType(self):
     class MaskVariable(extension_type.ExtensionType):
       variable: resource_variable_ops.ResourceVariable
-      mask: ops.Tensor
+      mask: tensor_lib.Tensor
 
     v = resource_variable_ops.ResourceVariable([1., 2.])
     self.evaluate(v.initializer)
@@ -1853,6 +1871,24 @@ class ResourceVariableOpsTest(test_util.TensorFlowTestCase,
         nest.flatten(v, expand_composites=True),
         expand_composites=True)
     self.assertEqual(reconstructed_v._handle_name, expected_handle_name)
+
+  @test_util.run_in_graph_and_eager_modes
+  def testGatherBatchDimsNeg(self):
+    var = resource_variable_ops.ResourceVariable(
+        [1], dtype=dtypes.int32, name="var0"
+    )
+    with ops.control_dependencies([var.initializer]):
+      with self.assertRaisesRegex(
+          (ValueError, errors.InvalidArgumentError),
+          "(batch_dims is negative)|(Expected batch_dims in the range)"
+      ):
+        result = resource_variable_ops.resource_gather(
+            var.handle,
+            indices=[1],
+            dtype=var.dtype,
+            batch_dims=-42,
+        )
+        self.evaluate(result)
 
 if __name__ == "__main__":
   test.main()

@@ -19,11 +19,11 @@ limitations under the License.
 #include "grpcpp/alarm.h"
 #include "grpcpp/completion_queue.h"
 #include "grpcpp/server_builder.h"
+#include "xla/tsl/distributed_runtime/rpc/async_service_interface.h"
+#include "xla/tsl/distributed_runtime/rpc/grpc_call.h"
 #include "tensorflow/core/distributed_runtime/eager/eager_service_impl.h"
 #include "tensorflow/core/distributed_runtime/rpc/eager/grpc_eager_service.h"
 #include "tensorflow/core/distributed_runtime/rpc/grpc_util.h"
-#include "tensorflow/tsl/distributed_runtime/rpc/async_service_interface.h"
-#include "tensorflow/tsl/distributed_runtime/rpc/grpc_call.h"
 
 namespace tensorflow {
 namespace eager {
@@ -160,7 +160,8 @@ class GrpcEagerServiceImpl : public tsl::AsyncServiceInterface {
   std::unique_ptr<::grpc::ServerCompletionQueue> cq_;
   grpc::EagerService::AsyncService service_;
 
-  TF_DISALLOW_COPY_AND_ASSIGN(GrpcEagerServiceImpl);
+  GrpcEagerServiceImpl(const GrpcEagerServiceImpl&) = delete;
+  void operator=(const GrpcEagerServiceImpl&) = delete;
 };
 
 }  // namespace eager

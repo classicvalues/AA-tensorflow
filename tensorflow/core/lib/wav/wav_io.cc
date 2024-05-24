@@ -15,14 +15,16 @@ limitations under the License.
 
 // Functions to write audio in WAV format.
 
+#include "tensorflow/core/lib/wav/wav_io.h"
+
 #include <math.h>
 #include <string.h>
+
 #include <algorithm>
 
 #include "absl/base/casts.h"
 #include "tensorflow/core/lib/core/coding.h"
 #include "tensorflow/core/lib/core/errors.h"
-#include "tensorflow/core/lib/wav/wav_io.h"
 #include "tensorflow/core/platform/byte_order.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/macros.h"
@@ -109,7 +111,7 @@ Status IncrementOffset(int old_offset, int64_t increment, size_t max_size,
     return errors::InvalidArgument("Offset too large, overflowed: ", sum);
   }
   *new_offset = sum;
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status ExpectText(const std::string& data, const std::string& expected_text,
@@ -124,7 +126,7 @@ Status ExpectText(const std::string& data, const std::string& expected_text,
                                    " but found ", found_text);
   }
   *offset = new_offset;
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status ReadString(const std::string& data, int expected_length,
@@ -134,7 +136,7 @@ Status ReadString(const std::string& data, int expected_length,
       IncrementOffset(*offset, expected_length, data.size(), &new_offset));
   *value = std::string(data.begin() + *offset, data.begin() + new_offset);
   *offset = new_offset;
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 template <typename T>
@@ -209,7 +211,7 @@ Status EncodeAudioAsS16LEWav(const float* audio, size_t sample_rate,
     core::EncodeFixed16(&data[i * kBytesPerSample],
                         static_cast<uint16>(sample));
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 template Status EncodeAudioAsS16LEWav<std::string>(const float* audio,
@@ -294,8 +296,9 @@ Status DecodeLin16WaveAsFloatVector(const std::string& wav_string,
         "Bad bytes per sample in WAV header: Expected ",
         expected_bytes_per_sample, " but got ", bytes_per_sample);
   }
-  const uint32 expected_bytes_per_second = bytes_per_sample * *sample_rate;
-  if (bytes_per_second != expected_bytes_per_second) {
+  const uint64 expected_bytes_per_second =
+      static_cast<uint64>(bytes_per_sample) * *sample_rate;
+  if (static_cast<uint64>(bytes_per_second) != expected_bytes_per_second) {
     return errors::InvalidArgument(
         "Bad bytes per second in WAV header: Expected ",
         expected_bytes_per_second, " but got ", bytes_per_second,
@@ -345,7 +348,7 @@ Status DecodeLin16WaveAsFloatVector(const std::string& wav_string,
   if (!was_data_found) {
     return errors::InvalidArgument("No data chunk found in WAV");
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 }  // namespace wav

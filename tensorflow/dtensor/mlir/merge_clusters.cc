@@ -39,6 +39,7 @@ limitations under the License.
 #include "mlir/Pass/Pass.h"  // from @llvm-project
 #include "mlir/Pass/PassManager.h"  // from @llvm-project
 #include "mlir/Support/DebugStringHelper.h"  // from @llvm-project
+#include "mlir/Support/LLVM.h"  // from @llvm-project
 #include "mlir/Support/LogicalResult.h"  // from @llvm-project
 #include "mlir/Transforms/Passes.h"  // from @llvm-project
 #include "mlir/Transforms/RegionUtils.h"  // from @llvm-project
@@ -278,16 +279,15 @@ void CloneEmptyIfWithPredicate(mlir::TF::IfRegionOp if_region, const Mesh& mesh,
   // DTensorSend op sends the predicate to `mesh` cluster with replicated
   // layout.
   mlir::TensorType predicate_tensor_type =
-      if_region.getCond().getType().cast<mlir::TensorType>();
+      mlir::cast<mlir::TensorType>(if_region.getCond().getType());
   const std::string send_recv_key =
       absl::StrCat(kSendRecvKeyPrefix, *num_send_recvs);
   *num_send_recvs += 1;
 
-  const Layout target_layout = Layout::ReplicatedOnMesh(mesh, 0);
   builder.create<mlir::TF::DTensorSend>(
       if_region.getLoc(), if_region.getCond(),
       builder.getStringAttr(send_recv_key),
-      mlir::dtensor::LayoutAttr::get(context, target_layout));
+      mlir::dtensor::MeshAttr::get(context, mesh));
 
   // Create new cluster op that contains cloned if operation.
   auto new_cluster = builder.create<mlir::tf_device::ClusterOp>(
@@ -303,7 +303,7 @@ void CloneEmptyIfWithPredicate(mlir::TF::IfRegionOp if_region, const Mesh& mesh,
       if_region.getLoc(), predicate_tensor_type,
       builder.getStringAttr(send_recv_key),
       mlir::TF::ShapeAttr::get(context, predicate_tensor_type),
-      mlir::dtensor::LayoutAttr::get(context, target_layout));
+      mlir::dtensor::MeshAttr::get(context, mesh));
 
   // Clone tf.IfRegion op inside newly created cluster and make sure
   // that the predicate tensor is from DTensorRecv op created above.
@@ -342,7 +342,7 @@ mlir::LogicalResult VerifyClusterInputOutput(
   mlir::LogicalResult result = mlir::success();
   mlir::visitUsedValuesDefinedAbove(
       cluster.getBody(), cluster.getBody(), [&](mlir::OpOperand* input) {
-        if (!input->get().isa<mlir::BlockArgument>()) {
+        if (!mlir::isa<mlir::BlockArgument>(input->get())) {
           result = cluster.emitOpError(
               "found nested tf_device.Cluster op with inputs. Nested cluster "
               "must use send/recv instead.");

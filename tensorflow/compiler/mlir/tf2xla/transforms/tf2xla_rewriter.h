@@ -29,9 +29,9 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/op_or_arg_name_mapper.h"
 #include "tensorflow/compiler/tf2xla/xla_context.h"
 #include "tensorflow/compiler/tf2xla/xla_expression.h"
-#include "tensorflow/compiler/xla/client/xla_builder.h"
-#include "tensorflow/compiler/xla/client/xla_computation.h"
-#include "tensorflow/compiler/xla/mlir_hlo/mhlo/IR/hlo_ops.h"
+#include "xla/client/xla_builder.h"
+#include "xla/client/xla_computation.h"
+#include "xla/mlir_hlo/mhlo/IR/hlo_ops.h"
 #include "tensorflow/core/common_runtime/device_mgr.h"
 #include "tensorflow/core/framework/op_kernel.h"
 
@@ -56,12 +56,12 @@ class Tf2XlaRewriter {
 
   // Compiles the given Operation with XlaBuilder and imports the generated HLO
   // via the HLO -> MHLO importer.
-  tsl::StatusOr<mhlo::TupleOp> CompileWithHloImporter(
+  absl::StatusOr<mhlo::TupleOp> CompileWithHloImporter(
       tensorflow::OpKernelContext& op_context);
 
   // Import the given XlaComputation into the parent module. Returns the given
   // generated function.
-  tsl::StatusOr<mhlo::TupleOp> ImportXlaComputation(
+  absl::StatusOr<mhlo::TupleOp> ImportXlaComputation(
       xla::XlaComputation& computation);
 
   // Prepares OpKernelContext params common to all the ops.

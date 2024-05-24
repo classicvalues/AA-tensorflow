@@ -1,5 +1,5 @@
-load("//tensorflow:strict.default.bzl", "py_strict_library")
 load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
+load("//tensorflow:strict.default.bzl", "py_strict_library")
 load("//tensorflow:tensorflow.default.bzl", "cuda_py_strict_test", "tf_py_strict_test")
 load("//tensorflow/compiler/tests:build_defs.bzl", "tf_xla_py_strict_test")
 
@@ -26,7 +26,7 @@ py_strict_library(
     deps = [
         "//tensorflow/python/autograph/core:converter",
         "//tensorflow/python/autograph/impl:api",
-        "//tensorflow/python/util:tf_decorator",
+        "//tensorflow/python/util:tf_decorator_py",
     ],
 )
 
@@ -62,6 +62,7 @@ pytype_strict_library(
         "//tensorflow/python/types:core",
         "//tensorflow/python/util:compat",
         "//tensorflow/python/util:function_utils",
+        "//tensorflow/python/util:tf_stack",
     ],
 )
 
@@ -105,8 +106,8 @@ py_strict_library(
         "//tensorflow/python/framework:func_graph",
         "//tensorflow/python/framework:indexed_slices",
         "//tensorflow/python/framework:ops",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:tensor_shape",
-        "//tensorflow/python/framework:tensor_spec",
         "//tensorflow/python/framework:type_spec",
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:default_gradient",
@@ -117,7 +118,6 @@ py_strict_library(
         "//tensorflow/python/profiler:trace",
         "//tensorflow/python/trackable:base",
         "//tensorflow/python/types:core",
-        "//tensorflow/python/util:_pywrap_utils",
         "//tensorflow/python/util:compat",
         "//tensorflow/python/util:nest",
         "//tensorflow/python/util:object_identity",
@@ -168,7 +168,6 @@ py_strict_library(
         "//tensorflow/python/platform:tf_logging",
         "//tensorflow/python/profiler:trace",
         "//tensorflow/python/util:compat",
-        "//tensorflow/python/util:tf_decorator",
     ],
 )
 
@@ -224,7 +223,7 @@ py_strict_library(
         "//tensorflow/python/util:deprecation",
         "//tensorflow/python/util:nest",
         "//tensorflow/python/util:object_identity",
-        "//tensorflow/python/util:tf_decorator",
+        "//tensorflow/python/util:tf_decorator_py",
         "//tensorflow/python/util:tf_export",
         "//tensorflow/python/util:traceback_utils",
     ],
@@ -266,8 +265,8 @@ cuda_py_strict_test(
         "//tensorflow/python/framework:ops",
         "//tensorflow/python/framework:random_seed",
         "//tensorflow/python/framework:sparse_tensor",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:tensor_shape",
-        "//tensorflow/python/framework:tensor_spec",
         "//tensorflow/python/framework:test_lib",
         "//tensorflow/python/framework:test_ops",
         "//tensorflow/python/framework:type_spec",
@@ -289,6 +288,7 @@ cuda_py_strict_test(
         "//tensorflow/python/ops:script_ops",
         "//tensorflow/python/ops:sendrecv_ops_gen",
         "//tensorflow/python/ops:string_ops",
+        "//tensorflow/python/ops:training_ops_gen",
         "//tensorflow/python/ops:variable_scope",
         "//tensorflow/python/ops:variables",
         "//tensorflow/python/ops/ragged:ragged_factory_ops",
@@ -299,10 +299,9 @@ cuda_py_strict_test(
         "//tensorflow/python/saved_model:save",
         "//tensorflow/python/saved_model:save_context",
         "//tensorflow/python/saved_model:save_options",
-        "//tensorflow/python/training:training_ops",
         "//tensorflow/python/util:compat",
         "//tensorflow/python/util:nest",
-        "//tensorflow/python/util:tf_decorator",
+        "//tensorflow/python/util:tf_decorator_py",
         "@absl_py//absl/testing:parameterized",
     ],
 )
@@ -331,6 +330,10 @@ tf_py_strict_test(
 tf_xla_py_strict_test(
     name = "polymorphic_function_xla_jit_test",
     srcs = ["polymorphic_function_xla_jit_test.py"],
+    # copybara:uncomment_begin
+    # #TODO(b/185944215) # Remove once the bug is fixed.
+    # disable_tpu_tfrt = True,
+    # copybara:uncomment_end
     disabled_backends = [
         "cpu_ondemand",
     ],
@@ -338,6 +341,7 @@ tf_xla_py_strict_test(
     python_version = "PY3",
     tags = [
         "no_mac",
+        "no_oss",  # TODO(b/295654746)
         "no_pip",
         "no_tfrt",  # TODO(b/185944215)
         "no_windows",
@@ -352,7 +356,7 @@ tf_xla_py_strict_test(
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
         "//tensorflow/python/framework:ops",
-        "//tensorflow/python/framework:tensor_spec",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:test_lib",
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:collective_ops",
@@ -375,6 +379,10 @@ tf_xla_py_strict_test(
 tf_xla_py_strict_test(
     name = "polymorphic_function_xla_test",
     srcs = ["polymorphic_function_xla_test.py"],
+    # copybara:uncomment_begin
+    # #TODO(b/185944215) # Remove once the bug is fixed.
+    # disable_tpu_tfrt = True,
+    # copybara:uncomment_end
     enable_mlir_bridge = False,
     python_version = "PY3",
     tags = [
@@ -443,7 +451,6 @@ tf_py_strict_test(
     python_version = "PY3",
     deps = [
         ":function_type_utils",
-        ":polymorphic_function",
         ":tracing_compilation",
         "//tensorflow/core:protos_all_py",
         "//tensorflow/core/function/capture:capture_container",
@@ -455,10 +462,9 @@ tf_py_strict_test(
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:errors",
         "//tensorflow/python/framework:ops",
-        "//tensorflow/python/framework:tensor_spec",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:test_lib",
         "//tensorflow/python/framework:test_ops",
-        "//tensorflow/python/layers",
         "//tensorflow/python/module",
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:functional_ops_gen",
@@ -478,7 +484,6 @@ tf_py_strict_test(
         "//tensorflow/python/saved_model:save",
         "//tensorflow/python/util:compat",
         "//tensorflow/python/util:nest",
-        "//tensorflow/python/util:tf_decorator",
         "@absl_py//absl/testing:parameterized",
     ],
 )
@@ -535,9 +540,7 @@ py_strict_library(
     name = "function_context",
     srcs = ["function_context.py"],
     srcs_version = "PY3",
-    visibility = [
-        "//visibility:private",  # Only private by automation, not intent. Owner may accept CLs adding visibility. See go/scheuklappen#explicit-private.
-    ],
+    visibility = ["//visibility:private"],
     deps = [
         "//tensorflow/core/function/polymorphism:function_cache",
         "//tensorflow/python/eager:context",
@@ -585,10 +588,8 @@ py_strict_library(
         ":composite_tensor_utils",
         "//tensorflow/core/function/polymorphism:function_type",
         "//tensorflow/core/function/trace_type",
-        "//tensorflow/python/framework:composite_tensor",
-        "//tensorflow/python/framework:constant_op",
         "//tensorflow/python/framework:ops",
-        "//tensorflow/python/framework:tensor_spec",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:type_spec",
         "//tensorflow/python/ops:resource_variable_ops",
         "//tensorflow/python/util:nest",
@@ -608,7 +609,7 @@ tf_py_strict_test(
         "//tensorflow/core/function/trace_type",
         "//tensorflow/python/framework:tensor_spec",
         "//tensorflow/python/platform:client_testlib",
-        "//tensorflow/python/util:tf_decorator",
+        "//tensorflow/python/util:tf_decorator_py",
         "@absl_py//absl/testing:parameterized",
     ],
 )
@@ -617,7 +618,7 @@ py_strict_library(
     name = "compiler_ir",
     srcs = ["compiler_ir.py"],
     srcs_version = "PY3",
-    visibility = ["//tensorflow:internal"],
+    visibility = ["//visibility:private"],
     deps = [
         "//tensorflow/core/function/trace_type",
         "//tensorflow/python/eager:context",
@@ -634,6 +635,7 @@ tf_xla_py_strict_test(
     disabled_backends = [
         "cpu_ondemand",
         "gpu_a100",
+        "gpu_h100",
     ],
     enable_mlir_bridge = True,
     python_version = "PY3",
@@ -651,7 +653,7 @@ tf_xla_py_strict_test(
         "//tensorflow/python/framework:constant_op",
         "//tensorflow/python/framework:dtypes",
         "//tensorflow/python/framework:ops",
-        "//tensorflow/python/framework:tensor_spec",
+        "//tensorflow/python/framework:tensor",
         "//tensorflow/python/framework:test_lib",
         "//tensorflow/python/ops:array_ops",
         "//tensorflow/python/ops:array_ops_gen",

@@ -29,7 +29,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "absl/synchronization/mutex.h"
 #include "tensorflow/compiler/tf2xla/host_compute_metadata.pb.h"
-#include "tensorflow/compiler/xla/util.h"
+#include "xla/util.h"
 #include "tensorflow/core/framework/resource_mgr.h"
 #include "tensorflow/core/lib/core/refcount.h"
 #include "tensorflow/core/lib/core/threadpool.h"
@@ -162,7 +162,7 @@ class TpuCompilationCacheInterface : public ResourceBase {
 
   // Convenience method called by ~RefHolder without mu_ held. Calls
   // DiscardEntryRef on every element of entries.
-  void DiscardEntryRefs(gtl::ArraySlice<CompiledSubgraph*> entries);
+  void DiscardEntryRefs(absl::Span<CompiledSubgraph* const> entries);
 
   std::string DebugString() const override { return "TpuCompilationCacheBase"; }
 

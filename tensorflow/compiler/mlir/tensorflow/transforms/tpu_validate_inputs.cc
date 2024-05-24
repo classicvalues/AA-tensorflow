@@ -36,8 +36,8 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/tensorflow/ir/tf_types.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/attribute_utils.h"
 #include "tensorflow/compiler/mlir/tensorflow/utils/tpu_rewrite_device_util.h"
-#include "tensorflow/compiler/xla/client/sharding_builder.h"
-#include "tensorflow/compiler/xla/xla_data.pb.h"
+#include "xla/client/sharding_builder.h"
+#include "xla/xla_data.pb.h"
 
 namespace mlir {
 namespace TFTPU {
@@ -74,6 +74,7 @@ bool IsTpuRegularOp(Operation* op) {
             TypeID::get<TF::TPUPartitionedOutputV2Op>(),
             TypeID::get<TF::TPUReplicateMetadataOp>(),
             TypeID::get<mlir::tf_executor::FetchOp>(),
+            TypeID::get<TF::OutfeedEnqueueTupleOp>(),
         };
     return ops_set;
   }();
@@ -371,7 +372,8 @@ bool CheckOpsClusterIO(Operation* op, MetadataMap& metadata_map) {
 
 bool TypeMustBeNonXLA(const Type& type) {
   const Type elem = getElementTypeOrSelf(type);
-  return !elem.isa<TF::ResourceType>() && !tensorflow::TypeValidForXLA(type);
+  return !mlir::isa<TF::ResourceType>(elem) &&
+         !tensorflow::TypeValidForXLA(type);
 }
 
 // Check if the op cannot be XLA compiled. If the op does not satisfy this
@@ -538,6 +540,18 @@ bool IsValidMAXIMALSharding(Operation* op, MetadataMap& metadata_map) {
   return true;
 }
 
+bool HasSingleCoreTpu(Operation* op) {
+  if (auto compilation_attr =
+          op->getAttrOfType<mlir::StringAttr>(TF::kCompileDeviceTypeAttr)) {
+    if (compilation_attr.getValue().str() == TF::kTpuDevice) {
+      op->emitOpError(
+          "TF2XLA TPU bridge input check: found a single-core TPU graph");
+      return true;
+    }
+  }
+  return false;
+}
+
 void TPUValidateInputsPass::runOnOperation() {
   ModuleOp module = getOperation();
   bool success = true;
@@ -562,10 +576,11 @@ void TPUValidateInputsPass::runOnOperation() {
       success &= IsValidMAXIMALSharding(op, metadata_map);
       success &= IsValidShardingTupleForArity(op);
     }
+    success &= !HasSingleCoreTpu(op);
+    if (!success) {
+      signalPassFailure();
+    }
   });
-  if (!success) {
-    signalPassFailure();
-  }
 }
 
 }  // anonymous namespace

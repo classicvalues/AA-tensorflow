@@ -17,6 +17,7 @@
 import argparse
 import errno
 import glob
+import json
 import os
 import platform
 import re
@@ -35,9 +36,7 @@ _DEFAULT_CUDNN_VERSION = '2'
 _DEFAULT_TENSORRT_VERSION = '6'
 _DEFAULT_CUDA_COMPUTE_CAPABILITIES = '3.5,7.0'
 
-_SUPPORTED_ANDROID_NDK_VERSIONS = [
-    19, 20, 21
-]
+_SUPPORTED_ANDROID_NDK_VERSIONS = [19, 20, 21, 25]
 
 _DEFAULT_PROMPT_ASK_ATTEMPTS = 10
 
@@ -82,6 +81,10 @@ def is_macos():
 
 def is_ppc64le():
   return platform.machine() == 'ppc64le'
+
+
+def is_s390x():
+  return platform.machine() == 's390x'
 
 
 def is_cygwin():
@@ -605,9 +608,11 @@ def prompt_loop_or_load_from_env(environ_cp,
 
 def set_clang_cuda_compiler_path(environ_cp):
   """Set CLANG_CUDA_COMPILER_PATH."""
-  default_clang_path = '/usr/lib/llvm-16/bin/clang'
+  default_clang_path = '/usr/lib/llvm-17/bin/clang'
   if not os.path.exists(default_clang_path):
-    default_clang_path = which('clang') or ''
+    default_clang_path = '/usr/lib/llvm-16/bin/clang'
+    if not os.path.exists(default_clang_path):
+      default_clang_path = which('clang') or ''
 
   clang_cuda_compiler_path = prompt_loop_or_load_from_env(
       environ_cp,
@@ -740,31 +745,27 @@ def get_ndk_api_level(environ_cp, android_ndk_home_path):
           'another version. Compiling Android targets may result in confusing '
           'errors.\n' %
           (android_ndk_home_path, ndk_version, _SUPPORTED_ANDROID_NDK_VERSIONS))
+  write_action_env_to_bazelrc('ANDROID_NDK_VERSION', ndk_version)
 
   # Now grab the NDK API level to use. Note that this is different from the
   # SDK API level, as the NDK API level is effectively the *min* target SDK
   # version.
-  platforms = os.path.join(android_ndk_home_path, 'platforms')
-  api_levels = sorted(os.listdir(platforms))
-  api_levels = [
-      x.replace('android-', '') for x in api_levels if 'android-' in x
-  ]
-
-  def valid_api_level(api_level):
-    return os.path.exists(
-        os.path.join(android_ndk_home_path, 'platforms', 'android-' + api_level)
-    )
+  meta = open(os.path.join(android_ndk_home_path, 'meta/platforms.json'))
+  platforms = json.load(meta)
+  meta.close()
+  aliases = platforms['aliases']
+  api_levels = sorted(list(set([aliases[i] for i in aliases])))
 
   android_ndk_api_level = prompt_loop_or_load_from_env(
       environ_cp,
       var_name='ANDROID_NDK_API_LEVEL',
-      var_default='26',  # 26 is required to support AHardwareBuffer.
+      var_default='21',  # 21 is required for ARM64 support.
       ask_for_var=(
           'Please specify the (min) Android NDK API level to use. '
           '[Available levels: %s]'
       )
       % api_levels,
-      check_success=valid_api_level,
+      check_success=(lambda *_: True),
       error_msg='Android-%s is not present in the NDK path.',
   )
 
@@ -806,6 +807,18 @@ def choose_compiler(environ_cp):
   return var
 
 
+def choose_compiler_Win(environ_cp):
+  question = 'Do you want to use Clang to build TensorFlow?'
+  yes_reply = 'Add "--config=win_clang" to compile TensorFlow with CLANG.'
+  no_reply = 'MSVC will be used to compile TensorFlow.'
+  var = int(
+      get_var(
+          environ_cp, 'TF_NEED_CLANG', None, True, question, yes_reply, no_reply
+      )
+  )
+  return var
+
+
 def set_clang_compiler_path(environ_cp):
   """Set CLANG_COMPILER_PATH and environment variables.
 
@@ -820,9 +833,11 @@ def set_clang_compiler_path(environ_cp):
     string value for clang_compiler_path.
   """
   # Default path if clang-16 is installed by using apt-get install
-  default_clang_path = '/usr/lib/llvm-16/bin/clang'
+  default_clang_path = '/usr/lib/llvm-17/bin/clang'
   if not os.path.exists(default_clang_path):
-    default_clang_path = which('clang') or ''
+    default_clang_path = '/usr/lib/llvm-16/bin/clang'
+    if not os.path.exists(default_clang_path):
+      default_clang_path = which('clang') or ''
 
   clang_compiler_path = prompt_loop_or_load_from_env(
       environ_cp,
@@ -841,6 +856,44 @@ def set_clang_compiler_path(environ_cp):
   write_action_env_to_bazelrc('CLANG_COMPILER_PATH', clang_compiler_path)
   write_to_bazelrc('build --repo_env=CC=%s' % clang_compiler_path)
   write_to_bazelrc('build --repo_env=BAZEL_COMPILER=%s' % clang_compiler_path)
+
+  return clang_compiler_path
+
+
+def set_clang_compiler_path_win(environ_cp):
+  """Set CLANG_COMPILER_PATH and environment variables.
+
+  Loop over user prompts for clang path until receiving a valid response.
+  Default is used if no input is given. Set CLANG_COMPILER_PATH and write
+  environment variables CC and BAZEL_COMPILER to .bazelrc.
+
+  Args:
+    environ_cp: (Dict) copy of the os.environ.
+
+  Returns:
+    string value for clang_compiler_path.
+  """
+  # Default path if clang-16 is installed by using apt-get install
+  default_clang_path = 'C:/Program Files/LLVM/bin/clang.exe'
+  if not os.path.exists(default_clang_path):
+    default_clang_path = which('clang') or ''
+
+  clang_compiler_path = prompt_loop_or_load_from_env(
+      environ_cp,
+      var_name='CLANG_COMPILER_PATH',
+      var_default=default_clang_path,
+      ask_for_var='Please specify the path to clang executable.',
+      check_success=os.path.exists,
+      resolve_symlinks=True,
+      error_msg=(
+          'Invalid clang path. %s cannot be found. Note that Clang is now'
+          'preferred compiler. You may use MSVC by removing --config=win_clang'
+      ),
+  )
+
+  write_action_env_to_bazelrc('CLANG_COMPILER_PATH', clang_compiler_path)
+  write_to_bazelrc(f'build --repo_env=CC="{clang_compiler_path}"')
+  write_to_bazelrc(f'build --repo_env=BAZEL_COMPILER="{clang_compiler_path}"')
 
   return clang_compiler_path
 
@@ -875,11 +928,12 @@ def retrieve_clang_version(clang_executable):
 
 # Disable clang extension that rejects type definitions within offsetof.
 # This was added in clang-16 by https://reviews.llvm.org/D133574.
+# Still required for clang-17.
 # Can be removed once upb is updated, since a type definition is used within
 # offset of in the current version of ubp. See
 # https://github.com/protocolbuffers/upb/blob/9effcbcb27f0a665f9f345030188c0b291e32482/upb/upb.c#L183.
-def disable_clang16_offsetof_extension(clang_version):
-  if int(clang_version.split('.')[0]) == 16:
+def disable_clang_offsetof_extension(clang_version):
+  if int(clang_version.split('.')[0]) in (16, 17):
     write_to_bazelrc('build --copt=-Wno-gnu-offsetof-extensions')
 
 
@@ -1100,7 +1154,12 @@ def system_specific_test_config(environ_cp):
 
 
 def set_system_libs_flag(environ_cp):
+  """Set system libs flags."""
   syslibs = environ_cp.get('TF_SYSTEM_LIBS', '')
+
+  if is_s390x() and 'boringssl' not in syslibs:
+    syslibs = 'boringssl' + (', ' + syslibs if syslibs else '')
+
   if syslibs:
     if ',' in syslibs:
       syslibs = ','.join(sorted(syslibs.split(',')))
@@ -1377,8 +1436,9 @@ def main():
     else:
       raise UserInputError(
           'Invalid CUDA setting were provided %d '
-          'times in a row. Assuming to be a scripting mistake.' %
-          _DEFAULT_PROMPT_ASK_ATTEMPTS)
+          'times in a row. Assuming to be a scripting mistake.'
+          % _DEFAULT_PROMPT_ASK_ATTEMPTS
+      )
 
     set_tf_cuda_compute_capabilities(environ_cp)
     if 'LD_LIBRARY_PATH' in environ_cp and environ_cp.get(
@@ -1391,7 +1451,7 @@ def main():
       # Set up which clang we should use as the cuda / host compiler.
       clang_cuda_compiler_path = set_clang_cuda_compiler_path(environ_cp)
       clang_version = retrieve_clang_version(clang_cuda_compiler_path)
-      disable_clang16_offsetof_extension(clang_version)
+      disable_clang_offsetof_extension(clang_version)
     else:
       # Set up which gcc nvcc should use as the host compiler
       # No need to set this on Windows
@@ -1405,7 +1465,13 @@ def main():
       if environ_cp.get('TF_NEED_CLANG') == '1':
         clang_compiler_path = set_clang_compiler_path(environ_cp)
         clang_version = retrieve_clang_version(clang_compiler_path)
-        disable_clang16_offsetof_extension(clang_version)
+        disable_clang_offsetof_extension(clang_version)
+    if is_windows():
+      environ_cp['TF_NEED_CLANG'] = str(choose_compiler_Win(environ_cp))
+      if environ_cp.get('TF_NEED_CLANG') == '1':
+        clang_compiler_path = set_clang_compiler_path_win(environ_cp)
+        clang_version = retrieve_clang_version(clang_compiler_path)
+        disable_clang_offsetof_extension(clang_version)
 
   # ROCm / CUDA are mutually exclusive.
   # At most 1 GPU platform can be configured.

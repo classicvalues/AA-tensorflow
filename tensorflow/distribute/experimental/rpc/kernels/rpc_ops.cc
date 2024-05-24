@@ -78,7 +78,8 @@ class RpcServerRegisterOp : public OpKernel {
   NameAttrList func_;
   StructuredValue output_specs_;
   StructuredValue input_specs_;
-  TF_DISALLOW_COPY_AND_ASSIGN(RpcServerRegisterOp);
+  RpcServerRegisterOp(const RpcServerRegisterOp&) = delete;
+  void operator=(const RpcServerRegisterOp&) = delete;
 };
 
 // Create a server resource to store registered functions
@@ -88,7 +89,8 @@ class RpcServerOp : public OpKernel {
   void Compute(OpKernelContext* ctx) override;
 
  private:
-  TF_DISALLOW_COPY_AND_ASSIGN(RpcServerOp);
+  RpcServerOp(const RpcServerOp&) = delete;
+  void operator=(const RpcServerOp&) = delete;
 };
 
 // Start GRPC server with registered methods
@@ -98,7 +100,8 @@ class RpcServerStartOp : public OpKernel {
   void Compute(OpKernelContext* ctx) override;
 
  private:
-  TF_DISALLOW_COPY_AND_ASSIGN(RpcServerStartOp);
+  RpcServerStartOp(const RpcServerStartOp&) = delete;
+  void operator=(const RpcServerStartOp&) = delete;
 };
 
 // Create a client resource to store registered functions.
@@ -110,7 +113,8 @@ class RpcClientOp : public AsyncOpKernel {
  private:
   std::string name_;
   bool list_registered_methods_;
-  TF_DISALLOW_COPY_AND_ASSIGN(RpcClientOp);
+  RpcClientOp(const RpcClientOp&) = delete;
+  void operator=(const RpcClientOp&) = delete;
 };
 
 // Remote RPC using client handle passed and returns a future Resource handle to
@@ -121,7 +125,8 @@ class RpcCallOp : public OpKernel {
   void Compute(OpKernelContext* ctx) override;
 
  private:
-  TF_DISALLOW_COPY_AND_ASSIGN(RpcCallOp);
+  RpcCallOp(const RpcCallOp&) = delete;
+  void operator=(const RpcCallOp&) = delete;
 };
 
 // Remote Check Status Op waits till the RPC issued by Call Op is finished.
@@ -131,7 +136,8 @@ class RpcCheckStatusOp : public AsyncOpKernel {
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override;
 
  private:
-  TF_DISALLOW_COPY_AND_ASSIGN(RpcCheckStatusOp);
+  RpcCheckStatusOp(const RpcCheckStatusOp&) = delete;
+  void operator=(const RpcCheckStatusOp&) = delete;
 };
 
 // Op to get response output after RPC Call.
@@ -141,7 +147,8 @@ class RpcGetValueOp : public AsyncOpKernel {
   void ComputeAsync(OpKernelContext* ctx, DoneCallback done) override;
 
  private:
-  TF_DISALLOW_COPY_AND_ASSIGN(RpcGetValueOp);
+  RpcGetValueOp(const RpcGetValueOp&) = delete;
+  void operator=(const RpcGetValueOp&) = delete;
 };
 
 class DeleteRpcFutureResourceOp : public OpKernel {
@@ -199,7 +206,7 @@ class FunctionRegistry {
       return tensorflow::errors::InvalidArgument(
           absl::StrCat(method, " is already registered."));
     }
-    return OkStatus();
+    return absl::OkStatus();
   }
 
   tensorflow::Status LookUp(const std::string& method,
@@ -212,7 +219,7 @@ class FunctionRegistry {
     }
 
     *output = it->second;
-    return OkStatus();
+    return absl::OkStatus();
   }
 
   const gtl::FlatMap<std::string, FunctionMetadata>& List() const {
@@ -525,7 +532,7 @@ void RpcServerOp::Compute(OpKernelContext* ctx) {
   // Create resource
   auto creator = [address](RpcServer** server) {
     *server = new RpcServer(address);
-    return OkStatus();
+    return absl::OkStatus();
   };
   core::RefCountPtr<RpcServer> server;
   OP_REQUIRES_OK(ctx, LookupOrCreateResource<RpcServer>(ctx, resource_handle,
@@ -566,7 +573,7 @@ void RpcClientOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
   // Create resource
   auto creator = [&address, &resource_name, timeout_in_ms](RpcClient** client) {
     *client = new RpcClient(address, resource_name, timeout_in_ms);
-    return OkStatus();
+    return absl::OkStatus();
   };
 
   core::RefCountPtr<RpcClient> client;
@@ -617,7 +624,7 @@ void RpcServerStartOp::Compute(OpKernelContext* ctx) {
   OP_REQUIRES_OK(ctx, LookupResource(ctx, HandleFromInput(ctx, 0), &server));
 
   server->StartServer();
-  ctx->SetStatus(OkStatus());
+  ctx->SetStatus(absl::OkStatus());
 }
 
 RpcServerRegisterOp::RpcServerRegisterOp(OpKernelConstruction* ctx)
@@ -728,7 +735,7 @@ void RpcCallOp::Compute(OpKernelContext* ctx) {
   // Create resource
   auto creator = [](RpcFutureResource** resource) {
     *resource = new RpcFutureResource();
-    return OkStatus();
+    return absl::OkStatus();
   };
   core::RefCountPtr<RpcFutureResource> future_resource;
   OP_REQUIRES_OK(ctx, LookupOrCreateResource<RpcFutureResource>(
@@ -835,61 +842,6 @@ void RpcGetValueOp::ComputeAsync(OpKernelContext* ctx, DoneCallback done) {
       });
 }
 
-REGISTER_OP("RpcServer")
-    .Input("server_address: string")
-    .Output("server: resource")
-    .SetIsStateful();
-
-REGISTER_OP("RpcClient")
-    .Attr("shared_name: string = ''")
-    .Input("server_address: string")
-    .Attr("list_registered_methods: bool = false")
-    .Input("timeout_in_ms: int64")  // 0 indicates no timeout.
-                                    // Positive value indicates specified
-                                    // timeout.
-    .Output("client: resource")
-    .Output("method_specs: string")
-    .SetIsStateful();
-
-REGISTER_OP("RpcServerStart").Input("server: resource").SetIsStateful();
-
-REGISTER_OP("RpcServerRegister")
-    .Input("server: resource")
-    .Input("method_name: string")
-    .Input("captured_inputs: Tin")
-    .Attr("Tin: list(type) >=0 = []")
-    .Attr("f: func")
-    .Attr("input_specs: string = ''")
-    .Attr("output_specs: string")
-    .SetIsStateful();
-
-REGISTER_OP("DeleteRpcFutureResource")
-    .Input("handle: resource")
-    .Input("deleter: variant")
-    .SetShapeFn(shape_inference::NoOutputs);
-
-REGISTER_OP("RpcCall")
-    .Input("client: resource")
-    .Input("method_name: string")
-    .Input("args: Tin")
-    .Input("timeout_in_ms: int64")
-    .Attr("Tin: list(type) >= 0")
-    .Output("future: resource")
-    .Output("deleter: variant")
-    .SetIsStateful();
-
-REGISTER_OP("RpcCheckStatus")
-    .Input("status_or: resource")
-    .Output("error_code: int64")
-    .Output("error: string")
-    .SetIsStateful();
-
-REGISTER_OP("RpcGetValue")
-    .Input("status_or: resource")
-    .Attr("Tout: list(type) >= 0")
-    .Output("output: Tout")
-    .SetIsStateful();
-
 REGISTER_KERNEL_BUILDER(Name("RpcServer").Device(DEVICE_CPU), RpcServerOp);
 REGISTER_KERNEL_BUILDER(Name("RpcClient").Device(DEVICE_CPU), RpcClientOp);
 REGISTER_KERNEL_BUILDER(Name("RpcServerStart").Device(DEVICE_CPU),
@@ -904,5 +856,6 @@ REGISTER_KERNEL_BUILDER(Name("DeleteRpcFutureResource").Device(DEVICE_CPU),
                         DeleteRpcFutureResourceOp);
 
 REGISTER_INPUT_COLOCATION_EXEMPTION("RpcServerRegister");
+
 }  // namespace rpc
 }  // namespace tensorflow

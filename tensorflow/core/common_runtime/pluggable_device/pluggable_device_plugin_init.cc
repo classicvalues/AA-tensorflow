@@ -22,19 +22,20 @@ limitations under the License.
 #include "tensorflow/c/experimental/pluggable_profiler/pluggable_profiler_internal.h"
 #include "tensorflow/c/experimental/stream_executor/stream_executor_internal.h"
 #include "tensorflow/compiler/jit/flags.h"
+#include "tensorflow/compiler/jit/pjrt_device_context.h"
 #include "tensorflow/compiler/jit/xla_device.h"
-#include "tensorflow/compiler/xla/pjrt/pjrt_api.h"
+#include "xla/pjrt/c/pjrt_c_api.h"
+#include "xla/pjrt/pjrt_api.h"
 #include "tensorflow/core/common_runtime/copy_tensor.h"
 #include "tensorflow/core/common_runtime/next_pluggable_device/next_pluggable_device_api.h"
 #include "tensorflow/core/common_runtime/next_pluggable_device/next_pluggable_device_factory.h"
-#include "tensorflow/core/common_runtime/next_pluggable_device/pjrt_compile_on_demand_op.h"
 #include "tensorflow/core/common_runtime/pluggable_device/pluggable_device_factory.h"
 #include "tensorflow/core/common_runtime/pluggable_device/pluggable_device_util.h"
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/status.h"
-#include "tensorflow/tsl/platform/errors.h"
-#include "tensorflow/tsl/platform/statusor.h"
+#include "tsl/platform/errors.h"
+#include "tsl/platform/statusor.h"
 
 namespace tensorflow {
 
@@ -46,8 +47,8 @@ static Status InitDeviceModule(void* dso_handle) {
 
   if (absl::IsNotFound(status)) {
     VLOG(1) << "Device module not found.";
-    return OkStatus();
-  } else if (status != OkStatus()) {
+    return absl::OkStatus();
+  } else if (status != absl::OkStatus()) {
     return status;
   }
   auto init_fn = reinterpret_cast<stream_executor::SEInitPluginFn>(dso_symbol);
@@ -67,9 +68,10 @@ static Status InitDeviceModule(void* dso_handle) {
       /*is_pluggable_device=*/true));  // Register the Copy tensor.
 
   VLOG(1) << "Successfully initialized Device module.";
-  return OkStatus();
+  return absl::OkStatus();
 }
 
+typedef const PJRT_Api* (*PjrtApiInitFn)();
 static Status InitNextPluggableDeviceModule(void* dso_handle) {
   void* dso_symbol;
   tensorflow::Env* env = tensorflow::Env::Default();
@@ -79,8 +81,8 @@ static Status InitNextPluggableDeviceModule(void* dso_handle) {
       env->GetSymbolFromLibrary(dso_handle, "TFNPD_InitPlugin", &dso_symbol);
   if (absl::IsNotFound(status)) {
     VLOG(1) << "Next pluggable device module not found.";
-    return OkStatus();
-  } else if (status != OkStatus()) {
+    return absl::OkStatus();
+  } else if (status != absl::OkStatus()) {
     return status;
   }
   auto init_fn = reinterpret_cast<TFNPDInitPluginFn>(dso_symbol);
@@ -96,12 +98,17 @@ static Status InitNextPluggableDeviceModule(void* dso_handle) {
   if (absl::IsNotFound(status)) {
     VLOG(1) << "Loading PJRT plugin failed for " << device_type << ": "
             << status.message();
-    return OkStatus();
+    return absl::OkStatus();
   } else if (!status.ok()) {
     return status;
   }
-  auto init_pjrt_fn = reinterpret_cast<pjrt::PjrtApiInitFn>(dso_symbol);
-  TF_RETURN_IF_ERROR(pjrt::InitPjrtPlugin(init_pjrt_fn, device_type));
+  auto init_pjrt_fn = reinterpret_cast<PjrtApiInitFn>(dso_symbol);
+  TF_RETURN_IF_ERROR(pjrt::SetPjrtApi(device_type, init_pjrt_fn()));
+  TF_ASSIGN_OR_RETURN(bool is_pjrt_plugin_initialized,
+                      pjrt::IsPjrtPluginInitialized(device_type));
+  if (!is_pjrt_plugin_initialized) {
+    TF_RETURN_IF_ERROR(pjrt::InitializePjrtPlugin(device_type));
+  }
 
   DeviceFactory::Register(device_type,
                           std::make_unique<NextPluggableDeviceFactory>(
@@ -128,8 +135,12 @@ static Status InitNextPluggableDeviceModule(void* dso_handle) {
             << device_type;
   }
 
+  TF_RETURN_IF_ERROR(CopyTensor::Register(
+      DeviceType(device_type), DeviceType(device_type), PjRtDeviceToDeviceCopy,
+      /*is_pluggable_device=*/true));  // Register the Copy tensor.
+
   VLOG(1) << "Successfully initialized NextPluggableDevice module.";
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 static Status InitGraphModule(void* dso_handle) {
@@ -140,15 +151,15 @@ static Status InitGraphModule(void* dso_handle) {
 
   if (absl::IsNotFound(status)) {
     VLOG(1) << "Graph module not found.";
-    return OkStatus();
-  } else if (status != OkStatus()) {
+    return absl::OkStatus();
+  } else if (status != absl::OkStatus()) {
     return status;
   }
   auto init_fn = reinterpret_cast<grappler::TFInitGraphPluginFn>(dso_symbol);
   TF_RETURN_IF_ERROR(grappler::InitGraphPlugin(init_fn));
 
   VLOG(1) << "Successfully initialized Graph module.";
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 typedef void (*TFKernelInitFn)();
@@ -160,8 +171,8 @@ static Status InitKernelModule(void* dso_handle) {
 
   if (absl::IsNotFound(status)) {
     VLOG(1) << "Kernel module not found.";
-    return OkStatus();
-  } else if (status != OkStatus()) {
+    return absl::OkStatus();
+  } else if (status != absl::OkStatus()) {
     return status;
   }
 
@@ -169,7 +180,7 @@ static Status InitKernelModule(void* dso_handle) {
   init_fn();
 
   VLOG(1) << "Successfully initialized Kernel module.";
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 static Status InitProfilerModule(void* dso_handle) {
@@ -181,8 +192,8 @@ static Status InitProfilerModule(void* dso_handle) {
 
   if (absl::IsNotFound(status)) {
     VLOG(1) << "Profiler module not found.";
-    return OkStatus();
-  } else if (status != OkStatus()) {
+    return absl::OkStatus();
+  } else if (status != absl::OkStatus()) {
     return status;
   }
 
@@ -190,7 +201,7 @@ static Status InitProfilerModule(void* dso_handle) {
   TF_RETURN_IF_ERROR(profiler::InitPluginProfiler(init_fn));
 
   VLOG(1) << "Successfully initialized Profiler module";
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 Status RegisterPluggableDevicePlugin(void* dso_handle) {
@@ -209,7 +220,7 @@ Status RegisterPluggableDevicePlugin(void* dso_handle) {
   // Step 4 Init Profiler Module.
   TF_RETURN_IF_ERROR(InitProfilerModule(dso_handle));
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 }  // namespace tensorflow

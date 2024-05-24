@@ -1709,21 +1709,10 @@ func AssignVariableXlaConcatNDPaddings(value []int64) AssignVariableXlaConcatNDA
 //
 // Arguments:
 //
-//		resource: Resource variable for concatenated input tensors across all dimensions.
-//	  }
-//	  in_arg {
-//	    name: "inputs"
-//	    description: <<END
+//	resource: Resource variable for concatenated input tensors across all dimensions.
+//	inputs: Input tensor slices in row-major order to merge across all dimensions. All
 //
-// Input tensor slices in row-major order to merge across all dimensions. All
 // inputs must have the same shape.
-//
-//	}
-//	out_arg {
-//	  name: "output"
-//	  description: <<END
-//
-// Output tensor formed from merging input slices based on num_concats defined.
 //
 //	num_concats: Number of ways to merge per dimension.
 //
@@ -2515,6 +2504,22 @@ func BatchMatMulAdjY(value bool) BatchMatMulAttr {
 	}
 }
 
+// BatchMatMulGradX sets the optional grad_x attribute to value.
+// If not specified, defaults to false
+func BatchMatMulGradX(value bool) BatchMatMulAttr {
+	return func(m optionalAttr) {
+		m["grad_x"] = value
+	}
+}
+
+// BatchMatMulGradY sets the optional grad_y attribute to value.
+// If not specified, defaults to false
+func BatchMatMulGradY(value bool) BatchMatMulAttr {
+	return func(m optionalAttr) {
+		m["grad_y"] = value
+	}
+}
+
 // Multiplies slices of two tensors in batches.
 //
 // Multiplies all slices of `Tensor` `x` and `y` (each slice can be
@@ -2581,6 +2586,22 @@ func BatchMatMulV2AdjX(value bool) BatchMatMulV2Attr {
 func BatchMatMulV2AdjY(value bool) BatchMatMulV2Attr {
 	return func(m optionalAttr) {
 		m["adj_y"] = value
+	}
+}
+
+// BatchMatMulV2GradX sets the optional grad_x attribute to value.
+// If not specified, defaults to false
+func BatchMatMulV2GradX(value bool) BatchMatMulV2Attr {
+	return func(m optionalAttr) {
+		m["grad_x"] = value
+	}
+}
+
+// BatchMatMulV2GradY sets the optional grad_y attribute to value.
+// If not specified, defaults to false
+func BatchMatMulV2GradY(value bool) BatchMatMulV2Attr {
+	return func(m optionalAttr) {
+		m["grad_y"] = value
 	}
 }
 
@@ -2654,6 +2675,22 @@ func BatchMatMulV3AdjX(value bool) BatchMatMulV3Attr {
 func BatchMatMulV3AdjY(value bool) BatchMatMulV3Attr {
 	return func(m optionalAttr) {
 		m["adj_y"] = value
+	}
+}
+
+// BatchMatMulV3GradX sets the optional grad_x attribute to value.
+// If not specified, defaults to false
+func BatchMatMulV3GradX(value bool) BatchMatMulV3Attr {
+	return func(m optionalAttr) {
+		m["grad_x"] = value
+	}
+}
+
+// BatchMatMulV3GradY sets the optional grad_y attribute to value.
+// If not specified, defaults to false
+func BatchMatMulV3GradY(value bool) BatchMatMulV3Attr {
+	return func(m optionalAttr) {
+		m["grad_y"] = value
 	}
 }
 
@@ -5704,7 +5741,19 @@ func CollectiveAllToAllV2TimeoutSeconds(value float32) CollectiveAllToAllV2Attr 
 	}
 }
 
+// CollectiveAllToAllV2IsStateless sets the optional is_stateless attribute to value.
+// If not specified, defaults to false
+func CollectiveAllToAllV2IsStateless(value bool) CollectiveAllToAllV2Attr {
+	return func(m optionalAttr) {
+		m["is_stateless"] = value
+	}
+}
+
 // Mutually exchanges multiple tensors of identical type and shape.
+//
+// `is_stateless` means each op does not need control dependencies to other
+// collective ops. In this case, keys that are unique at runtime
+// (e.g. `instance_key`) should be used to distinguish collective groups.
 func CollectiveAllToAllV2(scope *Scope, input tf.Output, group_size tf.Output, group_key tf.Output, instance_key tf.Output, ordering_token []tf.Output, optional ...CollectiveAllToAllV2Attr) (data tf.Output) {
 	if scope.Err() != nil {
 		return
@@ -5982,7 +6031,19 @@ func CollectiveGatherV2TimeoutSeconds(value float32) CollectiveGatherV2Attr {
 	}
 }
 
+// CollectiveGatherV2IsStateless sets the optional is_stateless attribute to value.
+// If not specified, defaults to false
+func CollectiveGatherV2IsStateless(value bool) CollectiveGatherV2Attr {
+	return func(m optionalAttr) {
+		m["is_stateless"] = value
+	}
+}
+
 // Mutually accumulates multiple tensors of identical type and shape.
+//
+// `is_stateless` means each op does not need control dependencies to other
+// collective ops. In this case, keys that are unique at runtime
+// (e.g. `instance_key`) should be used to distinguish collective groups.
 func CollectiveGatherV2(scope *Scope, input tf.Output, group_size tf.Output, group_key tf.Output, instance_key tf.Output, ordering_token []tf.Output, optional ...CollectiveGatherV2Attr) (data tf.Output) {
 	if scope.Err() != nil {
 		return
@@ -6138,6 +6199,14 @@ func CollectiveReduceScatterV2TimeoutSeconds(value float32) CollectiveReduceScat
 	}
 }
 
+// CollectiveReduceScatterV2IsStateless sets the optional is_stateless attribute to value.
+// If not specified, defaults to false
+func CollectiveReduceScatterV2IsStateless(value bool) CollectiveReduceScatterV2Attr {
+	return func(m optionalAttr) {
+		m["is_stateless"] = value
+	}
+}
+
 // CollectiveReduceScatterV2MaxSubdivsPerDevice sets the optional max_subdivs_per_device attribute to value.
 // If not specified, defaults to -1
 func CollectiveReduceScatterV2MaxSubdivsPerDevice(value int64) CollectiveReduceScatterV2Attr {
@@ -6147,6 +6216,10 @@ func CollectiveReduceScatterV2MaxSubdivsPerDevice(value int64) CollectiveReduceS
 }
 
 // Mutually reduces multiple tensors of identical type and shape and scatters the result.
+//
+// `is_stateless` means each op does not need control dependencies to other
+// collective ops. In this case, keys that are unique at runtime
+// (e.g. `instance_key`) should be used to distinguish collective groups.
 func CollectiveReduceScatterV2(scope *Scope, input tf.Output, group_size tf.Output, group_key tf.Output, instance_key tf.Output, ordering_token []tf.Output, merge_op string, final_op string, optional ...CollectiveReduceScatterV2Attr) (data tf.Output) {
 	if scope.Err() != nil {
 		return
@@ -6185,6 +6258,14 @@ func CollectiveReduceV2TimeoutSeconds(value float32) CollectiveReduceV2Attr {
 	}
 }
 
+// CollectiveReduceV2IsStateless sets the optional is_stateless attribute to value.
+// If not specified, defaults to false
+func CollectiveReduceV2IsStateless(value bool) CollectiveReduceV2Attr {
+	return func(m optionalAttr) {
+		m["is_stateless"] = value
+	}
+}
+
 // CollectiveReduceV2MaxSubdivsPerDevice sets the optional max_subdivs_per_device attribute to value.
 // If not specified, defaults to -1
 func CollectiveReduceV2MaxSubdivsPerDevice(value int64) CollectiveReduceV2Attr {
@@ -6194,6 +6275,10 @@ func CollectiveReduceV2MaxSubdivsPerDevice(value int64) CollectiveReduceV2Attr {
 }
 
 // Mutually reduces multiple tensors of identical type and shape.
+//
+// `is_stateless` means each op does not need control dependencies to other
+// collective ops. In this case, keys that are unique at runtime
+// (e.g. `instance_key`) should be used to distinguish collective groups.
 func CollectiveReduceV2(scope *Scope, input tf.Output, group_size tf.Output, group_key tf.Output, instance_key tf.Output, ordering_token []tf.Output, merge_op string, final_op string, optional ...CollectiveReduceV2Attr) (data tf.Output) {
 	if scope.Err() != nil {
 		return
@@ -6612,6 +6697,59 @@ func ComputeBatchSize(scope *Scope, input_dataset tf.Output) (batch_size tf.Outp
 	return op.Output(0)
 }
 
+// An op computes the size of the deduplication data from embedding core and returns the updated config.
+//
+// This op is to compute size of the deduplication data so to provide this
+// information to the op that computes the tuple mask of deduplication data can
+// have static output shape.
+//
+// Arguments:
+//
+//	config: Serialized TPUEmbeddingConfiguration proto.
+//
+// Returns The size of the deduplicated data from infeed.
+func ComputeDedupDataSize(scope *Scope, config string) (num_elements tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	attrs := map[string]interface{}{"config": config}
+	opspec := tf.OpSpec{
+		Type: "ComputeDedupDataSize",
+
+		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
+// An op computes the size of the deduplication data from embedding core and returns the updated config.
+//
+// This op is to compute size of the deduplication data so to provide this
+// information to the op that computes the tuple mask of deduplication data can
+// have static output shape.
+//
+// Arguments:
+//
+//	config: Serialized TPUEmbeddingConfiguration proto.
+//	embedding_partitions: Serialized EmbeddingPartitionsProto proto.
+//	hbm_buffers_config: Serialized HbmBuffersConfig proto.
+//	tpu_topology: Serialized TpuTopologyArgsProto proto.
+//
+// Returns The size of the deduplicated data from infeed.
+func ComputeDedupDataSizeV2(scope *Scope, config string, embedding_partitions string, hbm_buffers_config string, tpu_topology string) (num_elements tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	attrs := map[string]interface{}{"config": config, "embedding_partitions": embedding_partitions, "hbm_buffers_config": hbm_buffers_config, "tpu_topology": tpu_topology}
+	opspec := tf.OpSpec{
+		Type: "ComputeDedupDataSizeV2",
+
+		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
 // An op computes tuple mask of deduplication data from embedding core.
 //
 // The deduplication data receiving from embedding core is a Tensor with
@@ -6635,6 +6773,39 @@ func ComputeDedupDataTupleMask(scope *Scope, config string) (output_shape tf.Out
 	attrs := map[string]interface{}{"config": config}
 	opspec := tf.OpSpec{
 		Type: "ComputeDedupDataTupleMask",
+
+		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
+// An op computes tuple mask of deduplication data from embedding core.
+//
+// The deduplication data receiving from embedding core is a Tensor with
+// type=DT_VARIANT. The tensor itself is an XLA nested tuple, whose elements are
+// rank 1 tensors. This op is to represents types and length of these elements.
+//
+// Arguments:
+//
+//	config: Serialized TPUEmbeddingConfiguration proto.
+//	embedding_partitions: Serialized EmbeddingPartitionsProto proto.
+//	hbm_buffers_config: Serialized HbmBuffersConfig proto.
+//	tpu_topology: Serialized TpuTopologyArgsProto proto.
+//
+// Returns A 2-D int tensor represent mask of deduplication data tuple generated by
+// `XlaRecvTPUEmbeddingDeduplicationData`. The tuple has several integer and float
+// type 1-D tensor tuple elements. The first dimenion of this output_shape 2-D
+// tensor is tensor type of tuple elements, `0` represents integer tensor, `1`
+// represents float tensor. The second dimension of `output_shape` gives length of
+// each tuple element.
+func ComputeDedupDataTupleMaskV2(scope *Scope, config string, embedding_partitions string, hbm_buffers_config string, tpu_topology string) (output_shape tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	attrs := map[string]interface{}{"config": config, "embedding_partitions": embedding_partitions, "hbm_buffers_config": hbm_buffers_config, "tpu_topology": tpu_topology}
+	opspec := tf.OpSpec{
+		Type: "ComputeDedupDataTupleMaskV2",
 
 		Attrs: attrs,
 	}
@@ -7147,7 +7318,7 @@ func ConvGroups(value int64) ConvAttr {
 	}
 }
 
-// Computes a N-D convolution given (N+2)-D `input` and `filter` tensors.
+// Computes a N-D convolution given (N+1+batch_dims)-D `input` and (N+2)-D `filter` tensors.
 //
 // General function for computing a N-D convolution. It is required that
 // `1 <= N <= 3`.
@@ -7173,7 +7344,7 @@ func ConvGroups(value int64) ConvAttr {
 //
 //	padding: The type of padding algorithm to use.
 //
-// Returns A 4-D tensor. The dimension order is determined by the value of
+// Returns A (N+1+batch_dims)-D tensor. The dimension order is determined by the value of
 // `channels_last_format`, see below for details.
 func Conv(scope *Scope, input tf.Output, filter tf.Output, strides []int64, padding string, optional ...ConvAttr) (output tf.Output) {
 	if scope.Err() != nil {
@@ -10436,6 +10607,29 @@ func DatasetCardinality(scope *Scope, input_dataset tf.Output, optional ...Datas
 			input_dataset,
 		},
 		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
+// Returns the fingerprint of `input_dataset`.
+//
+// Returns the fingerprint of `input_dataset`.
+//
+// Arguments:
+//
+//	input_dataset: A variant tensor representing the dataset to return fingerprint for.
+//
+// Returns The fingerprint of `input_dataset` in `uint64`
+func DatasetFingerprint(scope *Scope, input_dataset tf.Output) (fingerprint tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	opspec := tf.OpSpec{
+		Type: "DatasetFingerprint",
+		Input: []tf.Input{
+			input_dataset,
+		},
 	}
 	op := scope.AddOperation(opspec)
 	return op.Output(0)
@@ -13962,7 +14156,7 @@ func DynamicPartition(scope *Scope, data tf.Output, partitions tf.Output, num_pa
 // must have `data[i].shape = indices[i].shape + constant`.  In terms of this
 // `constant`, the output shape is
 //
-//	merged.shape = [max(indices)] + constant
+//	merged.shape = [max(indices) + 1] + constant
 //
 // Values are merged in order, so if an index appears in both `indices[m][i]` and
 // `indices[n][j]` for `(m,i) < (n,j)` the slice `data[n][j]` will appear in the
@@ -16747,6 +16941,45 @@ func FFT3D(scope *Scope, input tf.Output) (output tf.Output) {
 	return op.Output(0)
 }
 
+// ND fast Fourier transform.
+//
+// Computes the n-dimensional discrete Fourier transform over
+// designated dimensions of `input`. The designated dimensions of
+// `input` are assumed to be the result of `FFTND`.
+//
+// If fft_length[i]<shape(input)[i], the input is cropped. If
+// fft_length[i]>shape(input)[i], the input is padded with zeros. If fft_length
+// is not given, the default shape(input) is used.
+//
+// Axes mean the dimensions to perform the transform on. Default is to perform on
+// all axes.
+//
+// Arguments:
+//
+//	input: A complex tensor.
+//	fft_length: An int32 tensor. The FFT length for each dimension.
+//	axes: An int32 tensor with a same shape as fft_length. Axes to perform the transform.
+//
+// Returns A complex tensor of the same shape as `input`. The designated
+// dimensions of `input` are replaced with their Fourier transforms.
+//
+// @compatibility(numpy)
+// Equivalent to np.fft.fftn.
+// @end_compatibility
+func FFTND(scope *Scope, input tf.Output, fft_length tf.Output, axes tf.Output) (output tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	opspec := tf.OpSpec{
+		Type: "FFTND",
+		Input: []tf.Input{
+			input, fft_length, axes,
+		},
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
 // FIFOQueueV2Attr is an optional argument to FIFOQueueV2.
 type FIFOQueueV2Attr func(optionalAttr)
 
@@ -17429,6 +17662,42 @@ func FinalizeTPUEmbedding(scope *Scope, common_config tf.Output, memory_config t
 		},
 	}
 	return scope.AddOperation(opspec)
+}
+
+// An op that finalizes the TPUEmbedding configuration.
+//
+// Arguments:
+//
+//	common_config: A string-encoded common configuration proto containing metadata
+//
+// about the TPUEmbedding partitioner output and the HBM size (in bytes) required
+// for operation.
+//
+//	memory_config: A string-encoded memory config proto containing metadata about
+//
+// the memory allocations reserved for TPUEmbedding.
+//
+// Returns:
+//
+//	embedding_partitions: A string-encoded embedding partitions proto describing how embedding tables are
+//
+// partitioned along their feature and ID.
+//
+//	hbm_buffers_config: A string-encoded HBM buffers config proto specifies where HBM buffers are
+//
+// located.
+func FinalizeTPUEmbeddingV2(scope *Scope, common_config tf.Output, memory_config tf.Output) (embedding_partitions tf.Output, hbm_buffers_config tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	opspec := tf.OpSpec{
+		Type: "FinalizeTPUEmbeddingV2",
+		Input: []tf.Input{
+			common_config, memory_config,
+		},
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0), op.Output(1)
 }
 
 // Generates fingerprint values.
@@ -19294,6 +19563,10 @@ func GatherV2BatchDims(value int64) GatherV2Attr {
 // On GPU, if an out of bound index is found, a 0 is stored in the
 // corresponding output value.
 //
+// Note that on TPU, if any dimension of `params` is of size 0 then the output will
+// be the expected shape filled with zeros. On CPU and GPU an error will be
+// returned.
+//
 // See also `tf.batch_gather` and `tf.gather_nd`.
 //
 // Arguments:
@@ -19585,6 +19858,22 @@ func GetSessionTensor(scope *Scope, handle tf.Output, dtype tf.DataType) (value 
 			handle,
 		},
 		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
+// An op returns the TPU task ID from TPU topology.
+//
+// This op is to return the TPU task ID from TPU topology.
+//
+// Returns The TPU task ID from TPU topology.
+func GetTpuTaskId(scope *Scope) (tpu_task_id tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	opspec := tf.OpSpec{
+		Type: "GetTpuTaskId",
 	}
 	op := scope.AddOperation(opspec)
 	return op.Output(0)
@@ -19962,6 +20251,46 @@ func IFFT3D(scope *Scope, input tf.Output) (output tf.Output) {
 	return op.Output(0)
 }
 
+// ND inverse fast Fourier transform.
+//
+// Computes the n-dimensional inverse discrete Fourier transform over designated
+// dimensions of `input`. The designated dimensions of `input` are assumed to be
+// the result of `IFFTND`.
+//
+// If fft_length[i]<shape(input)[i], the input is cropped. If
+// fft_length[i]>shape(input)[i], the input is padded with zeros. If fft_length
+// is not given, the default shape(input) is used.
+//
+// Axes mean the dimensions to perform the transform on. Default is to perform on
+// all axes.
+//
+// Arguments:
+//
+//	input: A complex tensor.
+//	fft_length: An int32 tensor. The FFT length for each dimension.
+//	axes: An int32 tensor with a same shape as fft_length. Axes to perform the transform.
+//
+// Returns A complex tensor of the same shape as `input`. The designated dimensions of
+// `input` are replaced with their inverse Fourier
+// transforms.
+//
+// @compatibility(numpy)
+// Equivalent to np.fft.fftn.
+// @end_compatibility
+func IFFTND(scope *Scope, input tf.Output, fft_length tf.Output, axes tf.Output) (output tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	opspec := tf.OpSpec{
+		Type: "IFFTND",
+		Input: []tf.Input{
+			input, fft_length, axes,
+		},
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
 // IRFFTAttr is an optional argument to IRFFT.
 type IRFFTAttr func(optionalAttr)
 
@@ -20134,6 +20463,62 @@ func IRFFT3D(scope *Scope, input tf.Output, fft_length tf.Output, optional ...IR
 		Type: "IRFFT3D",
 		Input: []tf.Input{
 			input, fft_length,
+		},
+		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
+// IRFFTNDAttr is an optional argument to IRFFTND.
+type IRFFTNDAttr func(optionalAttr)
+
+// IRFFTNDTreal sets the optional Treal attribute to value.
+// If not specified, defaults to DT_FLOAT
+func IRFFTNDTreal(value tf.DataType) IRFFTNDAttr {
+	return func(m optionalAttr) {
+		m["Treal"] = value
+	}
+}
+
+// ND inverse real fast Fourier transform.
+//
+// Computes the n-dimensional inverse real discrete Fourier transform over
+// designated dimensions of `input`. The designated dimensions of `input` are
+// assumed to be the result of `IRFFTND`. The inner-most dimension contains the
+// `fft_length / 2 + 1` unique components of the DFT of a real-valued signal.
+//
+// If fft_length[i]<shape(input)[i], the input is cropped. If
+// fft_length[i]>shape(input)[i], the input is padded with zeros. If fft_length
+// is not given, the default shape(input) is used.
+//
+// Axes mean the dimensions to perform the transform on. Default is to perform on
+// all axes.
+//
+// Arguments:
+//
+//	input: A complex tensor.
+//	fft_length: An int32 tensor. The FFT length for each dimension.
+//	axes: An int32 tensor with a same shape as fft_length. Axes to perform the transform.
+//
+// Returns A complex tensor of the same shape as `input`. The designated dimensions of
+// `input` are replaced with their inverse real Fourier transforms.
+//
+// @compatibility(numpy)
+// Equivalent to np.fft.irfftn.
+// @end_compatibility
+func IRFFTND(scope *Scope, input tf.Output, fft_length tf.Output, axes tf.Output, optional ...IRFFTNDAttr) (output tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	attrs := map[string]interface{}{}
+	for _, a := range optional {
+		a(attrs)
+	}
+	opspec := tf.OpSpec{
+		Type: "IRFFTND",
+		Input: []tf.Input{
+			input, fft_length, axes,
 		},
 		Attrs: attrs,
 	}
@@ -21477,6 +21862,29 @@ func IteratorGetDevice(scope *Scope, resource tf.Output) (device tf.Output) {
 		Type: "IteratorGetDevice",
 		Input: []tf.Input{
 			resource,
+		},
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
+// Returns the serialized model proto of an iterator resource.
+//
+// Returns the serialized model proto of an iterator resource.
+//
+// Arguments:
+//
+//	iterator: An resource from an dataset iterator.
+//
+// Returns A serialized model proto.
+func IteratorGetModelProto(scope *Scope, iterator tf.Output) (model_proto tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	opspec := tf.OpSpec{
+		Type: "IteratorGetModelProto",
+		Input: []tf.Input{
+			iterator,
 		},
 	}
 	op := scope.AddOperation(opspec)
@@ -24450,6 +24858,22 @@ func MatMulTransposeA(value bool) MatMulAttr {
 func MatMulTransposeB(value bool) MatMulAttr {
 	return func(m optionalAttr) {
 		m["transpose_b"] = value
+	}
+}
+
+// MatMulGradA sets the optional grad_a attribute to value.
+// If not specified, defaults to false
+func MatMulGradA(value bool) MatMulAttr {
+	return func(m optionalAttr) {
+		m["grad_a"] = value
+	}
+}
+
+// MatMulGradB sets the optional grad_b attribute to value.
+// If not specified, defaults to false
+func MatMulGradB(value bool) MatMulAttr {
+	return func(m optionalAttr) {
+		m["grad_b"] = value
 	}
 }
 
@@ -34749,6 +35173,62 @@ func RFFT3D(scope *Scope, input tf.Output, fft_length tf.Output, optional ...RFF
 	return op.Output(0)
 }
 
+// RFFTNDAttr is an optional argument to RFFTND.
+type RFFTNDAttr func(optionalAttr)
+
+// RFFTNDTcomplex sets the optional Tcomplex attribute to value.
+// If not specified, defaults to DT_COMPLEX64
+func RFFTNDTcomplex(value tf.DataType) RFFTNDAttr {
+	return func(m optionalAttr) {
+		m["Tcomplex"] = value
+	}
+}
+
+// ND fast real Fourier transform.
+//
+// Computes the n-dimensional real discrete Fourier transform over designated
+// dimensions of `input`. The designated dimensions of `input` are assumed to be
+// the result of `RFFTND`. The length of the last axis transformed will be
+// fft_length[-1]//2+1.
+//
+// If fft_length[i]<shape(input)[i], the input is cropped. If
+// fft_length[i]>shape(input)[i], the input is padded with zeros. If fft_length
+// is not given, the default shape(input) is used.
+//
+// Axes mean the dimensions to perform the transform on. Default is to perform on
+// all axes.
+//
+// Arguments:
+//
+//	input: A complex tensor.
+//	fft_length: An int32 tensor. The FFT length for each dimension.
+//	axes: An int32 tensor with a same shape as fft_length. Axes to perform the transform.
+//
+// Returns A complex tensor of the same shape as `input`. The designated
+// dimensions of `input` are replaced with their real Fourier transforms.
+//
+// @compatibility(numpy)
+// Equivalent to np.fft.rfftn.
+// @end_compatibility
+func RFFTND(scope *Scope, input tf.Output, fft_length tf.Output, axes tf.Output, optional ...RFFTNDAttr) (output tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	attrs := map[string]interface{}{}
+	for _, a := range optional {
+		a(attrs)
+	}
+	opspec := tf.OpSpec{
+		Type: "RFFTND",
+		Input: []tf.Input{
+			input, fft_length, axes,
+		},
+		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
 // Converts one or more images from RGB to HSV.
 //
 // Outputs a tensor of the same shape as the `images` tensor, containing the HSV
@@ -36313,17 +36793,14 @@ func ReadVariableXlaSplitNDPaddings(value []int64) ReadVariableXlaSplitNDAttr {
 //
 // Arguments:
 //
-//		resource: Resource variable of input tensor to split across all dimensions.
-//	  }
-//	  out_arg {
-//	    name: "outputs"
-//	    description: <<END
+//	resource: Resource variable of input tensor to split across all dimensions.
 //
-// Output slices based on input and num_splits defined, in row-major order.
 //
 //	num_splits: Number of ways to split per dimension. Shape dimensions must be evenly
 //
 // divisible.
+//
+// Returns Output slices based on input and num_splits defined, in row-major order.
 func ReadVariableXlaSplitND(scope *Scope, resource tf.Output, T tf.DataType, N int64, num_splits []int64, optional ...ReadVariableXlaSplitNDAttr) (outputs []tf.Output) {
 	if scope.Err() != nil {
 		return
@@ -46905,6 +47382,17 @@ func SparseReshape(scope *Scope, input_indices tf.Output, input_shape tf.Output,
 	return op.Output(0), op.Output(1)
 }
 
+// SparseSegmentMeanAttr is an optional argument to SparseSegmentMean.
+type SparseSegmentMeanAttr func(optionalAttr)
+
+// SparseSegmentMeanSparseGradient sets the optional sparse_gradient attribute to value.
+// If not specified, defaults to false
+func SparseSegmentMeanSparseGradient(value bool) SparseSegmentMeanAttr {
+	return func(m optionalAttr) {
+		m["sparse_gradient"] = value
+	}
+}
+
 // Computes the mean along sparse segments of a tensor.
 //
 // See `tf.sparse.segment_sum` for usage examples.
@@ -46919,15 +47407,20 @@ func SparseReshape(scope *Scope, input_indices tf.Output, input_shape tf.Output,
 //
 // Returns Has same shape as data, except for dimension 0 which
 // has size `k`, the number of segments.
-func SparseSegmentMean(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output) (output tf.Output) {
+func SparseSegmentMean(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, optional ...SparseSegmentMeanAttr) (output tf.Output) {
 	if scope.Err() != nil {
 		return
+	}
+	attrs := map[string]interface{}{}
+	for _, a := range optional {
+		a(attrs)
 	}
 	opspec := tf.OpSpec{
 		Type: "SparseSegmentMean",
 		Input: []tf.Input{
 			data, indices, segment_ids,
 		},
+		Attrs: attrs,
 	}
 	op := scope.AddOperation(opspec)
 	return op.Output(0)
@@ -46984,6 +47477,17 @@ func SparseSegmentMeanGradV2(scope *Scope, grad tf.Output, indices tf.Output, se
 	return op.Output(0), op.Output(1)
 }
 
+// SparseSegmentMeanWithNumSegmentsAttr is an optional argument to SparseSegmentMeanWithNumSegments.
+type SparseSegmentMeanWithNumSegmentsAttr func(optionalAttr)
+
+// SparseSegmentMeanWithNumSegmentsSparseGradient sets the optional sparse_gradient attribute to value.
+// If not specified, defaults to false
+func SparseSegmentMeanWithNumSegmentsSparseGradient(value bool) SparseSegmentMeanWithNumSegmentsAttr {
+	return func(m optionalAttr) {
+		m["sparse_gradient"] = value
+	}
+}
+
 // Computes the mean along sparse segments of a tensor.
 //
 // Like `SparseSegmentMean`, but allows missing ids in `segment_ids`. If an id is
@@ -47001,18 +47505,34 @@ func SparseSegmentMeanGradV2(scope *Scope, grad tf.Output, indices tf.Output, se
 //
 // Returns Has same shape as data, except for dimension 0 which has size
 // `num_segments`.
-func SparseSegmentMeanWithNumSegments(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, num_segments tf.Output) (output tf.Output) {
+func SparseSegmentMeanWithNumSegments(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, num_segments tf.Output, optional ...SparseSegmentMeanWithNumSegmentsAttr) (output tf.Output) {
 	if scope.Err() != nil {
 		return
+	}
+	attrs := map[string]interface{}{}
+	for _, a := range optional {
+		a(attrs)
 	}
 	opspec := tf.OpSpec{
 		Type: "SparseSegmentMeanWithNumSegments",
 		Input: []tf.Input{
 			data, indices, segment_ids, num_segments,
 		},
+		Attrs: attrs,
 	}
 	op := scope.AddOperation(opspec)
 	return op.Output(0)
+}
+
+// SparseSegmentSqrtNAttr is an optional argument to SparseSegmentSqrtN.
+type SparseSegmentSqrtNAttr func(optionalAttr)
+
+// SparseSegmentSqrtNSparseGradient sets the optional sparse_gradient attribute to value.
+// If not specified, defaults to false
+func SparseSegmentSqrtNSparseGradient(value bool) SparseSegmentSqrtNAttr {
+	return func(m optionalAttr) {
+		m["sparse_gradient"] = value
+	}
 }
 
 // Computes the sum along sparse segments of a tensor divided by the sqrt of N.
@@ -47028,15 +47548,20 @@ func SparseSegmentMeanWithNumSegments(scope *Scope, data tf.Output, indices tf.O
 //
 // Returns Has same shape as data, except for dimension 0 which
 // has size `k`, the number of segments.
-func SparseSegmentSqrtN(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output) (output tf.Output) {
+func SparseSegmentSqrtN(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, optional ...SparseSegmentSqrtNAttr) (output tf.Output) {
 	if scope.Err() != nil {
 		return
+	}
+	attrs := map[string]interface{}{}
+	for _, a := range optional {
+		a(attrs)
 	}
 	opspec := tf.OpSpec{
 		Type: "SparseSegmentSqrtN",
 		Input: []tf.Input{
 			data, indices, segment_ids,
 		},
+		Attrs: attrs,
 	}
 	op := scope.AddOperation(opspec)
 	return op.Output(0)
@@ -47093,6 +47618,17 @@ func SparseSegmentSqrtNGradV2(scope *Scope, grad tf.Output, indices tf.Output, s
 	return op.Output(0), op.Output(1)
 }
 
+// SparseSegmentSqrtNWithNumSegmentsAttr is an optional argument to SparseSegmentSqrtNWithNumSegments.
+type SparseSegmentSqrtNWithNumSegmentsAttr func(optionalAttr)
+
+// SparseSegmentSqrtNWithNumSegmentsSparseGradient sets the optional sparse_gradient attribute to value.
+// If not specified, defaults to false
+func SparseSegmentSqrtNWithNumSegmentsSparseGradient(value bool) SparseSegmentSqrtNWithNumSegmentsAttr {
+	return func(m optionalAttr) {
+		m["sparse_gradient"] = value
+	}
+}
+
 // Computes the sum along sparse segments of a tensor divided by the sqrt of N.
 //
 // N is the size of the segment being reduced.
@@ -47112,18 +47648,34 @@ func SparseSegmentSqrtNGradV2(scope *Scope, grad tf.Output, indices tf.Output, s
 //
 // Returns Has same shape as data, except for dimension 0 which
 // has size `k`, the number of segments.
-func SparseSegmentSqrtNWithNumSegments(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, num_segments tf.Output) (output tf.Output) {
+func SparseSegmentSqrtNWithNumSegments(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, num_segments tf.Output, optional ...SparseSegmentSqrtNWithNumSegmentsAttr) (output tf.Output) {
 	if scope.Err() != nil {
 		return
+	}
+	attrs := map[string]interface{}{}
+	for _, a := range optional {
+		a(attrs)
 	}
 	opspec := tf.OpSpec{
 		Type: "SparseSegmentSqrtNWithNumSegments",
 		Input: []tf.Input{
 			data, indices, segment_ids, num_segments,
 		},
+		Attrs: attrs,
 	}
 	op := scope.AddOperation(opspec)
 	return op.Output(0)
+}
+
+// SparseSegmentSumAttr is an optional argument to SparseSegmentSum.
+type SparseSegmentSumAttr func(optionalAttr)
+
+// SparseSegmentSumSparseGradient sets the optional sparse_gradient attribute to value.
+// If not specified, defaults to false
+func SparseSegmentSumSparseGradient(value bool) SparseSegmentSumAttr {
+	return func(m optionalAttr) {
+		m["sparse_gradient"] = value
+	}
 }
 
 // Computes the sum along sparse segments of a tensor.
@@ -47165,15 +47717,20 @@ func SparseSegmentSqrtNWithNumSegments(scope *Scope, data tf.Output, indices tf.
 //
 // Returns Has same shape as data, except for dimension 0 which
 // has size `k`, the number of segments.
-func SparseSegmentSum(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output) (output tf.Output) {
+func SparseSegmentSum(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, optional ...SparseSegmentSumAttr) (output tf.Output) {
 	if scope.Err() != nil {
 		return
+	}
+	attrs := map[string]interface{}{}
+	for _, a := range optional {
+		a(attrs)
 	}
 	opspec := tf.OpSpec{
 		Type: "SparseSegmentSum",
 		Input: []tf.Input{
 			data, indices, segment_ids,
 		},
+		Attrs: attrs,
 	}
 	op := scope.AddOperation(opspec)
 	return op.Output(0)
@@ -47230,6 +47787,17 @@ func SparseSegmentSumGradV2(scope *Scope, grad tf.Output, indices tf.Output, seg
 	return op.Output(0), op.Output(1)
 }
 
+// SparseSegmentSumWithNumSegmentsAttr is an optional argument to SparseSegmentSumWithNumSegments.
+type SparseSegmentSumWithNumSegmentsAttr func(optionalAttr)
+
+// SparseSegmentSumWithNumSegmentsSparseGradient sets the optional sparse_gradient attribute to value.
+// If not specified, defaults to false
+func SparseSegmentSumWithNumSegmentsSparseGradient(value bool) SparseSegmentSumWithNumSegmentsAttr {
+	return func(m optionalAttr) {
+		m["sparse_gradient"] = value
+	}
+}
+
 // Computes the sum along sparse segments of a tensor.
 //
 // Like `SparseSegmentSum`, but allows missing ids in `segment_ids`. If an id is
@@ -47272,15 +47840,20 @@ func SparseSegmentSumGradV2(scope *Scope, grad tf.Output, indices tf.Output, seg
 //
 // Returns Has same shape as data, except for dimension 0 which
 // has size `num_segments`.
-func SparseSegmentSumWithNumSegments(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, num_segments tf.Output) (output tf.Output) {
+func SparseSegmentSumWithNumSegments(scope *Scope, data tf.Output, indices tf.Output, segment_ids tf.Output, num_segments tf.Output, optional ...SparseSegmentSumWithNumSegmentsAttr) (output tf.Output) {
 	if scope.Err() != nil {
 		return
+	}
+	attrs := map[string]interface{}{}
+	for _, a := range optional {
+		a(attrs)
 	}
 	opspec := tf.OpSpec{
 		Type: "SparseSegmentSumWithNumSegments",
 		Input: []tf.Input{
 			data, indices, segment_ids, num_segments,
 		},
+		Attrs: attrs,
 	}
 	op := scope.AddOperation(opspec)
 	return op.Output(0)
@@ -51346,6 +51919,31 @@ func TPUCompileSucceededAssert(scope *Scope, compilation_status tf.Output) (o *t
 	return scope.AddOperation(opspec)
 }
 
+// Op that copies host tensor to device with dynamic shape support.
+// For internal use only.
+func TPUCopyWithDynamicShape(scope *Scope, tensors []tf.Output, unpadded_sizes []tf.Output) (tpu_tensors []tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	opspec := tf.OpSpec{
+		Type: "TPUCopyWithDynamicShape",
+		Input: []tf.Input{
+			tf.OutputList(tensors), tf.OutputList(unpadded_sizes),
+		},
+	}
+	op := scope.AddOperation(opspec)
+	if scope.Err() != nil {
+		return
+	}
+	var idx int
+	var err error
+	if tpu_tensors, idx, err = makeOutputList(op, idx, "tpu_tensors"); err != nil {
+		scope.UpdateErr("TPUCopyWithDynamicShape", err)
+		return
+	}
+	return tpu_tensors
+}
+
 // An op enabling differentiation of TPU Embeddings.
 //
 // This op simply returns its first input, which is assumed to have been sliced
@@ -54198,7 +54796,7 @@ func ThreadUnsafeUnigramCandidateSampler(scope *Scope, true_classes tf.Output, n
 //
 // Arguments:
 //
-//	input: 1-D or higher.
+//	input: Can be of any rank.
 //	multiples: 1-D. Length must be the same as the number of dimensions in `input`
 func Tile(scope *Scope, input tf.Output, multiples tf.Output) (output tf.Output) {
 	if scope.Err() != nil {
@@ -57200,6 +57798,28 @@ func Unstage(scope *Scope, dtypes []tf.DataType, optional ...UnstageAttr) (value
 	return values
 }
 
+// An op to update the task ID and global core array.
+//
+// This op is to update the task ID and global core array.
+//
+// Arguments:
+//
+//	tpu_task_id_to_shard_id: An array of int32 that maps TPU task ID to shard ID.
+//
+// Returns the created operation.
+func UpdateTaskIdAndGlobalCoreArray(scope *Scope, tpu_task_id_to_shard_id []tf.Output) (o *tf.Operation) {
+	if scope.Err() != nil {
+		return
+	}
+	opspec := tf.OpSpec{
+		Type: "UpdateTaskIdAndGlobalCoreArray",
+		Input: []tf.Input{
+			tf.OutputList(tpu_task_id_to_shard_id),
+		},
+	}
+	return scope.AddOperation(opspec)
+}
+
 // UpperBoundAttr is an optional argument to UpperBound.
 type UpperBoundAttr func(optionalAttr)
 
@@ -57281,6 +57901,16 @@ func VarHandleOpContainer(value string) VarHandleOpAttr {
 func VarHandleOpSharedName(value string) VarHandleOpAttr {
 	return func(m optionalAttr) {
 		m["shared_name"] = value
+	}
+}
+
+// VarHandleOpDebugName sets the optional debug_name attribute to value.
+//
+// value: the user-given name, which still applies in anonymous mode.
+// If not specified, defaults to ""
+func VarHandleOpDebugName(value string) VarHandleOpAttr {
+	return func(m optionalAttr) {
+		m["debug_name"] = value
 	}
 }
 
@@ -57959,14 +58589,9 @@ func XlaConcatNDPaddings(value []int64) XlaConcatNDAttr {
 //
 // inputs must have the same shape.
 //
-//	}
-//	out_arg {
-//	  name: "output"
-//	  description: <<END
-//
-// Output tensor formed from merging input slices based on num_concats defined.
-//
 //	num_concats: Number of ways to merge per dimension.
+//
+// Returns Output tensor formed from merging input slices based on num_concats defined.
 func XlaConcatND(scope *Scope, inputs []tf.Output, num_concats []int64, optional ...XlaConcatNDAttr) (output tf.Output) {
 	if scope.Err() != nil {
 		return
@@ -58552,6 +59177,60 @@ func XlaRecvTPUEmbeddingActivations(scope *Scope, deduplication_data tf.Output, 
 	return outputs
 }
 
+// An op that receives embedding activations on the TPU.
+//
+// The TPU system performs the embedding lookups and aggregations. The results of
+// these aggregations are visible to the Tensorflow Graph as the outputs of a
+// XlaRecvTPUEmbeddingActivations Op. This op returns a list containing one
+// Tensor of activations per table specified in the model.
+//
+// Arguments:
+//
+//	deduplication_data: A Tensor with type=DT_VARIANT containing the deduplication
+//
+// data. The tensor is an XLA nested tuple containing N elements (where N is
+// the ratio of the number of embedding to tensor cores per TPU chip). Each
+// element of the nested tuple is a tuple of rank 1 tensors. Each tensor either
+// contains indices (DT_UINT32) for embedding lookup on the TensorCore or
+// weights (DT_FLOAT) to apply to the output of the embedding lookup operation.
+//
+//	num_tables: The number of output activation tensors. If feature descriptor is
+//
+// present in the tpu embedding config, it is equal to the number of features
+// otherwise equal to number of embedding tables in the model.
+//
+//	config: Serialized TPUEmbeddingConfiguration proto.
+//	embedding_partitions: Serialized EmbeddingPartitionsProto proto.
+//	hbm_buffers_config: Serialized HbmBuffersConfig proto.
+//	tpu_topology: Serialized TpuTopologyArgsProto proto.
+//
+// Returns A TensorList of embedding activations containing one Tensor per
+// embedding table in the model.
+func XlaRecvTPUEmbeddingActivationsV2(scope *Scope, deduplication_data tf.Output, num_tables int64, config string, embedding_partitions string, hbm_buffers_config string, tpu_topology string) (outputs []tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	attrs := map[string]interface{}{"num_tables": num_tables, "config": config, "embedding_partitions": embedding_partitions, "hbm_buffers_config": hbm_buffers_config, "tpu_topology": tpu_topology}
+	opspec := tf.OpSpec{
+		Type: "XlaRecvTPUEmbeddingActivationsV2",
+		Input: []tf.Input{
+			deduplication_data,
+		},
+		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	if scope.Err() != nil {
+		return
+	}
+	var idx int
+	var err error
+	if outputs, idx, err = makeOutputList(op, idx, "outputs"); err != nil {
+		scope.UpdateErr("XlaRecvTPUEmbeddingActivationsV2", err)
+		return
+	}
+	return outputs
+}
+
 // Receives deduplication data (indices and weights) from the embedding core.
 //
 // The deduplication data is a Tensor with type=DT_VARIANT. The tensor itself is an
@@ -58571,6 +59250,35 @@ func XlaRecvTPUEmbeddingDeduplicationData(scope *Scope, config string) (output t
 	attrs := map[string]interface{}{"config": config}
 	opspec := tf.OpSpec{
 		Type: "XlaRecvTPUEmbeddingDeduplicationData",
+
+		Attrs: attrs,
+	}
+	op := scope.AddOperation(opspec)
+	return op.Output(0)
+}
+
+// Receives deduplication data (indices and weights) from the embedding core.
+//
+// The deduplication data is a Tensor with type=DT_VARIANT. The tensor itself is an
+// XLA nested tuple containing N elements (where N is the ratio of the number of
+// embedding to tensor cores per TPU chip). Each element of the nested tuple is a
+// tuple of rank 1 tensors. Each tensor either contains indices (DT_UINT32) for
+// embedding lookup on the TensorCore or weights (DT_FLOAT) to apply to the output
+// of the embedding lookup operation.
+//
+// Arguments:
+//
+//	config: Serialized TPUEmbeddingConfiguration proto.
+//	embedding_partitions: Serialized EmbeddingPartitionsProto proto.
+//	hbm_buffers_config: Serialized HbmBuffersConfig proto.
+//	tpu_topology: Serialized TpuTopologyArgsProto proto.
+func XlaRecvTPUEmbeddingDeduplicationDataV2(scope *Scope, config string, embedding_partitions string, hbm_buffers_config string, tpu_topology string) (output tf.Output) {
+	if scope.Err() != nil {
+		return
+	}
+	attrs := map[string]interface{}{"config": config, "embedding_partitions": embedding_partitions, "hbm_buffers_config": hbm_buffers_config, "tpu_topology": tpu_topology}
+	opspec := tf.OpSpec{
+		Type: "XlaRecvTPUEmbeddingDeduplicationDataV2",
 
 		Attrs: attrs,
 	}
@@ -58826,6 +59534,52 @@ func XlaSendTPUEmbeddingGradients(scope *Scope, gradients []tf.Output, learning_
 	return scope.AddOperation(opspec)
 }
 
+// An op that performs gradient updates of embedding tables.
+//
+// The gradients argument is a TensorList having the same length and shapes as the
+// return value of XlaRecvTPUEmbeddingActivations, but contains gradients of the
+// model's loss with respect to the embedding activations. The embedding tables are
+// updated from these gradients via the optimizer specified in the
+// TPUEmbeddingConfiguration proto given to tpu.initialize_system.
+//
+// Arguments:
+//
+//	gradients: A TensorList of gradients with which to update embedding tables.
+//	learning_rates: A TensorList of learning rates used for updating the embedding
+//
+// tables via the optimizer. The length of the TensorList must be equal to the
+// number of dynamic learning rate tags specified in the
+// TPUEmbeddingConfiguration proto.
+//
+//	deduplication_data: A Tensor with type=DT_VARIANT containing the deduplication
+//
+// data. The tensor is an XLA nested tuple containing N elements (where N is
+// the ratio of the number of embedding to tensor cores per TPU chip). Each
+// element of the nested tuple is a tuple of rank 1 tensors. Each tensor either
+// contains indices (DT_UINT32) for embedding lookup on the TensorCore or
+// weights (DT_FLOAT) to apply to the output of the embedding lookup operation.
+//
+//	config: Serialized TPUEmbeddingConfiguration proto.
+//	embedding_partitions: Serialized EmbeddingPartitionsProto proto.
+//	hbm_buffers_config: Serialized HbmBuffersConfig proto.
+//	tpu_topology: Serialized TpuTopologyArgsProto proto.
+//
+// Returns the created operation.
+func XlaSendTPUEmbeddingGradientsV2(scope *Scope, gradients []tf.Output, learning_rates []tf.Output, deduplication_data tf.Output, config string, embedding_partitions string, hbm_buffers_config string, tpu_topology string) (o *tf.Operation) {
+	if scope.Err() != nil {
+		return
+	}
+	attrs := map[string]interface{}{"config": config, "embedding_partitions": embedding_partitions, "hbm_buffers_config": hbm_buffers_config, "tpu_topology": tpu_topology}
+	opspec := tf.OpSpec{
+		Type: "XlaSendTPUEmbeddingGradientsV2",
+		Input: []tf.Input{
+			tf.OutputList(gradients), tf.OutputList(learning_rates), deduplication_data,
+		},
+		Attrs: attrs,
+	}
+	return scope.AddOperation(opspec)
+}
+
 // An op to send a tensor to the host.
 //
 // input: the tensor that will be sent to the host.
@@ -59012,17 +59766,13 @@ func XlaSplitNDPaddings(value []int64) XlaSplitNDAttr {
 //
 // Arguments:
 //
-//		input: Input tensor to split across all dimensions.
-//	  }
-//	  out_arg {
-//	    name: "outputs"
-//	    description: <<END
-//
-// Output slices based on input and num_splits defined, in row-major order.
+//	input: Input tensor to split across all dimensions.
 //
 //	num_splits: Number of ways to split per dimension. Shape dimensions must be evenly
 //
 // divisible.
+//
+// Returns Output slices based on input and num_splits defined, in row-major order.
 func XlaSplitND(scope *Scope, input tf.Output, N int64, num_splits []int64, optional ...XlaSplitNDAttr) (outputs []tf.Output) {
 	if scope.Err() != nil {
 		return

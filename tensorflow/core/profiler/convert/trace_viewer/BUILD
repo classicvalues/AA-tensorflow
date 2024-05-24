@@ -1,5 +1,5 @@
-load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 load("//tensorflow:tensorflow.bzl", "tf_cc_test")
+load("//tensorflow/core/platform:rules_cc.bzl", "cc_library")
 
 package(
     # copybara:uncomment default_applicable_licenses = ["//tensorflow:license"],
@@ -25,9 +25,9 @@ cc_library(
     deps = [
         ":trace_events_filter_interface",
         "//tensorflow/core/profiler/protobuf:trace_events_proto_cc",
-        "//tensorflow/tsl/profiler/utils:timespan",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/types:optional",
+        "@local_tsl//tsl/profiler/utils:timespan",
     ],
 )
 
@@ -39,7 +39,7 @@ tf_cc_test(
         "//tensorflow/core:test",
         "//tensorflow/core:test_main",
         "//tensorflow/core/profiler/protobuf:trace_events_proto_cc",
-        "//tensorflow/tsl/profiler/utils:timespan",
+        "@local_tsl//tsl/profiler/utils:timespan",
     ],
 )
 
@@ -65,13 +65,13 @@ cc_library(
         "//tensorflow/core/profiler/protobuf:task_proto_cc",
         "//tensorflow/core/profiler/protobuf:trace_events_proto_cc",
         "//tensorflow/core/profiler/protobuf:trace_events_raw_proto_cc",
-        "//tensorflow/tsl/platform:protobuf",
-        "//tensorflow/tsl/profiler/utils:timespan",
         "@com_google_absl//absl/container:fixed_array",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
+        "@local_tsl//tsl/platform:protobuf",
+        "@local_tsl//tsl/profiler/utils:timespan",
     ],
 )
 
@@ -91,8 +91,8 @@ cc_library(
     deps = [
         "//tensorflow/core/profiler/protobuf:trace_events_proto_cc",
         "//tensorflow/core/profiler/utils:xplane_visitor",
-        "//tensorflow/tsl/profiler/utils:timespan",
         "@com_google_absl//absl/algorithm:container",
+        "@local_tsl//tsl/profiler/utils:timespan",
     ],
 )
 
@@ -109,15 +109,17 @@ cc_library(
         "//tensorflow/core/profiler/protobuf:task_proto_cc",
         "//tensorflow/core/profiler/protobuf:trace_events_proto_cc",
         "//tensorflow/core/profiler/protobuf:trace_events_raw_proto_cc",
-        "//tensorflow/tsl/platform:status",
-        "//tensorflow/tsl/profiler/utils:timespan",
         "@com_google_absl//absl/base:endian",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/functional:bind_front",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
+        "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:optional",
+        "@local_tsl//tsl/lib/io:iterator",
+        "@local_tsl//tsl/platform:status",
+        "@local_tsl//tsl/profiler/utils:timespan",
     ],
 )

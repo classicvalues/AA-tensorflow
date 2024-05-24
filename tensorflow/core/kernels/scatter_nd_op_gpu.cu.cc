@@ -17,7 +17,7 @@ limitations under the License.
 
 #define EIGEN_USE_GPU
 
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
 #include "tensorflow/core/framework/register_types.h"
 #include "tensorflow/core/kernels/scatter_nd_op.h"
 #include "tensorflow/core/platform/types.h"
@@ -124,8 +124,9 @@ __global__ void ScatterNdOpKernel(
 namespace functor {
 
 // Functor used by ScatterOp to do the computations.
-template <typename T, typename Index, scatter_nd_op::UpdateOp op, int IXDIM>
-struct ScatterNdFunctor<GPUDevice, T, Index, op, IXDIM> {
+template <typename T, typename Index, scatter_nd_op::UpdateOp op, int IXDIM,
+          bool kDropBadIndices>
+struct ScatterNdFunctor<GPUDevice, T, Index, op, IXDIM, kDropBadIndices> {
   Index operator()(
       const GPUDevice& d, const Index slice_size,
       const Eigen::array<Eigen::DenseIndex, IXDIM> output_shape_prefix,
@@ -164,8 +165,9 @@ struct ScatterNdFunctor<GPUDevice, T, Index, op, IXDIM> {
 
 }  // namespace functor
 
-#define DECLARE_GPU_SPECS_INDEX_OP_IXDIM(T, Index, op, IXDIM) \
-  template struct functor::ScatterNdFunctor<GPUDevice, T, Index, op, IXDIM>;
+#define DECLARE_GPU_SPECS_INDEX_OP_IXDIM(T, Index, op, IXDIM)               \
+  template struct functor::ScatterNdFunctor<GPUDevice, T, Index, op, IXDIM, \
+                                            /*kDropBadIndices=*/true>;
 
 #define DECLARE_GPU_SPECS_INDEX_OP(T, Index, op)     \
   DECLARE_GPU_SPECS_INDEX_OP_IXDIM(T, Index, op, 1); \

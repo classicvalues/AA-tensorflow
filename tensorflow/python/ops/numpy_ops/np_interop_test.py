@@ -287,7 +287,7 @@ class InteropTest(tf.test.TestCase):
     output_layer = tf.keras.layers.Lambda(np.square)(inputs)
     model = tf.keras.Model([inputs], output_layer)
 
-    values = onp.arange(10, dtype=onp.float32)
+    values = onp.arange(10, dtype=onp.float32).reshape((1, 10))
     values_as_array = np.asarray(values)
 
     result = model(values)
@@ -455,7 +455,7 @@ class VariableTest(InteropTest):
 
 
 if __name__ == '__main__':
-  ops.enable_numpy_style_type_promotion()
+  ops.set_dtype_conversion_mode('legacy')
   np_math_ops.enable_numpy_methods_on_tensor()
   tf.compat.v1.enable_eager_execution()
   tf.test.main()

@@ -20,7 +20,7 @@ limitations under the License.
 #include "llvm/ADT/StringRef.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/tensorflow/utils/serialize_mlir_module_utils.h"
-#include "tensorflow/tsl/platform/statusor.h"
+#include "tsl/platform/statusor.h"
 
 namespace mlir {
 namespace mhlo {
@@ -28,7 +28,7 @@ namespace test {
 
 // Given a raw string, return a ModuleOp that can be used with the given
 // MLIRContext.
-tsl::StatusOr<OwningOpRef<ModuleOp>> GetMlirModuleFromString(
+absl::StatusOr<OwningOpRef<ModuleOp>> GetMlirModuleFromString(
     absl::string_view module_string, MLIRContext* mlir_context);
 
 }  // namespace test

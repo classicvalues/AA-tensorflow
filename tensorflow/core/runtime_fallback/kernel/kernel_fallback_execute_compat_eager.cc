@@ -21,7 +21,7 @@ limitations under the License.
 #include "tensorflow/core/runtime_fallback/kernel/kernel_fallback_compat_request_state.h"
 #include "tensorflow/core/runtime_fallback/kernel/kernel_fallback_utils.h"
 #include "tensorflow/core/tfrt/fallback/op_kernel_runner.h"
-#include "tensorflow/tsl/platform/refcount.h"
+#include "tsl/platform/refcount.h"
 #include "tfrt/host_context/execution_context.h"  // from @tf_runtime
 
 namespace tensorflow {
@@ -73,7 +73,7 @@ Status SetUpKernelFallbackCompatRequestContext(
   fallback_request_state.set_log_device_placement(
       eager_context->LogDevicePlacement());
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 }  // namespace tfd

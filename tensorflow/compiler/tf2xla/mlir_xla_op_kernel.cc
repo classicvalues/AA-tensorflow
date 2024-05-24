@@ -19,7 +19,7 @@ limitations under the License.
 
 #include "mlir/IR/MLIRContext.h"  // from @llvm-project
 #include "tensorflow/compiler/jit/xla_compile_util.h"
-#include "tensorflow/compiler/mlir/tf2xla/api/v0/compile_mlir_util.h"
+#include "tensorflow/compiler/mlir/tf2xla/api/v1/compile_mlir_util.h"
 #include "tensorflow/compiler/mlir/utils/array_container_utils.h"
 #include "tensorflow/compiler/tf2xla/xla_op_kernel.h"
 #include "tensorflow/core/framework/resource_op_kernel.h"
@@ -35,7 +35,7 @@ class MLIRContextResource : public ResourceBase {
 
   static Status Create(MLIRContextResource** resource) {
     *resource = new MLIRContextResource();
-    return OkStatus();
+    return absl::OkStatus();
   }
   mlir::MLIRContext* GetContext() { return &mlir_ctx_; }
   std::string DebugString() const override {
@@ -84,7 +84,7 @@ Status MlirXlaOpKernel::ContextToXlaArgs(
     }
     xla_args.push_back(arg);
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 MlirXlaOpKernel::MlirXlaOpKernel(OpKernelConstruction* ctx)
@@ -137,19 +137,31 @@ Status MlirXlaOpKernel::ConstructXlaOp(XlaOpKernelContext* ctx) {
   // Compile the graph to HLO.
   GraphDebugInfo debug_info;
   std::vector<xla::XlaOp> returns(1);
-  TF_RETURN_IF_ERROR(BuildHloFromGraph(
-      *graph, *ctx->builder(), *ctx_res->GetContext(), xla_params, returns,
-      mlir::SpanToArrayRef<XlaCompiler::Argument>(xla_args), control_rets,
-      device->device_type(),
-      *ctx->function_library()->GetFunctionLibraryDefinition(), debug_info,
-      {}));
+  auto build_hlo = [&](bool unconditionally_use_output_shapes) {
+    return BuildHloFromGraph(
+        *graph, *ctx->builder(), *ctx_res->GetContext(), xla_params, returns,
+        unconditionally_use_output_shapes,
+        mlir::SpanToArrayRef<XlaCompiler::Argument>(xla_args), control_rets,
+        device->device_type(),
+        *ctx->function_library()->GetFunctionLibraryDefinition(), debug_info,
+        {});
+  };
+
+  // Some of the operations that come through here do not know how to set their
+  // own output shapes (e.g. _XlaHostComputeMlir') so we may need to use the
+  // unconditional output shapes option. However, many graphs fail if we do it
+  // unconditionally so try both.
+  if (!build_hlo(/*unconditionally_use_output_shapes=*/false).ok()) {
+    // If that failed, then try again with the unconditional set true
+    TF_RETURN_IF_ERROR(build_hlo(/*unconditionally_use_output_shapes=*/true));
+  }
 
   // Set context outputs.
   for (int i = 0, end = returns.size(); i < end; ++i) {
     ctx->SetOutput(i, returns[i]);
   }
 
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 void MlirXlaOpKernel::Compile(XlaOpKernelContext* ctx) {

@@ -34,7 +34,7 @@ namespace tfrt_stub {
 
 using ::tensorflow::thread::ThreadPoolInterface;
 
-StatusOr<std::unique_ptr<WorkQueueInterface>>
+absl::StatusOr<std::unique_ptr<WorkQueueInterface>>
 TfThreadPoolWorkQueue::InitializeRequest(int64_t request_id) const {
   return {std::make_unique<TfThreadPoolWorkQueue>(
       request_id, intra_op_threadpool_, inter_op_threadpool_)};
@@ -56,8 +56,8 @@ std::optional<tfrt::TaskFunction> TfThreadPoolWorkQueue::AddBlockingTask(
 }
 
 void TfThreadPoolWorkQueue::Quiesce() {
-  // TODO(b/186668821): implement this
-  CHECK(false);  // Crash OK
+  // We don't need Quiesce() in most cases. And for the rest cases, we can rely
+  // on the destructor the thread pools.
 }
 
 // From

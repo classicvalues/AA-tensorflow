@@ -45,7 +45,8 @@ class GatherNdOp : public OpKernel {
 
     Tensor out;
     OP_REQUIRES_OK(
-        c, functor::DoGatherNd<Device, T, Index>(c, params, indices, &out));
+        c, functor::DoGatherNd<Device, T, Index, /*kDropBadIndices=*/false>(
+               c, params, indices, &out));
     c->set_output(0, out);
   }
 };
@@ -72,6 +73,8 @@ class GatherNdOp : public OpKernel {
 // Same for the GPU kernel.
 TF_CALL_ALL_TYPES(REGISTER_GATHER_ND_CPU);
 TF_CALL_QUANTIZED_TYPES(REGISTER_GATHER_ND_CPU);
+TF_CALL_float8_e5m2(REGISTER_GATHER_ND_CPU);
+TF_CALL_float8_e4m3fn(REGISTER_GATHER_ND_CPU);
 
 #undef REGISTER_GATHER_ND_CPU
 

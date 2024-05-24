@@ -1,5 +1,7 @@
 load("//tensorflow:pytype.default.bzl", "pytype_strict_library")
 load("//tensorflow:strict.default.bzl", "py_strict_test")
+
+# Placeholder: load py_proto_library
 load(
     "//tensorflow/core/platform:build_config.bzl",
     "tf_proto_library",
@@ -16,7 +18,7 @@ pytype_strict_library(
         "type_dispatch.py",
     ],
     srcs_version = "PY3",
-    visibility = ["//tensorflow:internal"],
+    visibility = ["//visibility:private"],
     deps = [
         ":function_type",
     ],
@@ -29,6 +31,7 @@ py_strict_test(
     deps = [
         ":function_type",
         ":type_dispatch",
+        #internal proto upb dep
         "//tensorflow/python/platform:client_testlib",
         "//tensorflow/python/types:trace",
     ],
@@ -57,6 +60,7 @@ py_strict_test(
     visibility = ["//learning/brain/contrib/eager/python/examples:__pkg__"],
     deps = [
         ":function_cache",
+        #internal proto upb dep
         "//tensorflow/core/function/polymorphism:function_type",
         "//tensorflow/core/function/trace_type",
         "//tensorflow/python/ops:array_ops",
@@ -91,14 +95,14 @@ tf_proto_library(
     protodeps = [
         "//tensorflow/core/function/trace_type:serialization_proto",
     ],
-    visibility = ["//tensorflow:internal"],
+    visibility = ["//visibility:private"],
 )
 
 # copybara:uncomment_begin(google-only)
 # py_proto_library(
 #     name = "function_type_py_pb2",
 #     api_version = 2,
-#     visibility = ["//tensorflow:internal"],
+#     visibility = ["//visibility:private"],
 #     deps = [":function_type_proto"],
 # )
 # copybara:uncomment_end
@@ -109,6 +113,7 @@ py_strict_test(
     python_version = "PY3",
     deps = [
         ":function_type",
+        #internal proto upb dep
         "//tensorflow/core/function/polymorphism:function_type_proto_py",
         "//tensorflow/core/function/trace_type",
         "//tensorflow/core/function/trace_type:serialization",

@@ -17,7 +17,7 @@ limitations under the License.
 #define TENSORFLOW_CORE_KERNELS_GATHER_ND_OP_H_
 // Functor definition for GatherOp, must be compilable by nvcc.
 
-#include "third_party/eigen3/unsupported/Eigen/CXX11/Tensor"
+#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
 #include "tensorflow/core/framework/bounds_check.h"
 #include "tensorflow/core/framework/op_kernel.h"
 #include "tensorflow/core/framework/tensor.h"
@@ -43,7 +43,8 @@ struct GatherNdSlice {
                    typename TTypes<T>::Matrix Tout);
 };
 
-template <typename Device, typename T, typename Index>
+template <typename Device, typename T, typename Index,
+          bool kDropBadIndices = false>
 Status DoGatherNd(OpKernelContext* c, const Tensor& params,
                   const Tensor& indices, Tensor* out) {
   if (!TensorShapeUtils::IsVectorOrHigher(params.shape())) {
@@ -151,6 +152,10 @@ Status DoGatherNd(OpKernelContext* c, const Tensor& params,
             indices_nd);
     }
 
+    if constexpr (kDropBadIndices) {
+      return absl::OkStatus();
+    }
+
     // bad_i will only return >= 0 on CPUs right now.
     if (bad_i >= 0) {
       auto shape = indices.shape();
@@ -163,7 +168,7 @@ Status DoGatherNd(OpKernelContext* c, const Tensor& params,
           ", node name: ", c->op_kernel().name());
     }
   }
-  return OkStatus();
+  return absl::OkStatus();
 }
 
 }  // namespace functor

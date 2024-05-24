@@ -242,8 +242,8 @@ def set_optimizer_experimental_options(options):
       - implementation_selector: Enable the swap of kernel implementations based
         on the device placement.
       - auto_mixed_precision: Change certain float32 ops to float16 on Volta
-        GPUs and above. Without the use of loss scaling, this can cause
-        numerical underflow (see
+        GPUs and above; and on CPUs with AMX FP16 support. Without the use of
+        loss scaling, this can cause numerical underflow (see
         `keras.mixed_precision.experimental.LossScaleOptimizer`).
       - disable_meta_optimizer: Disable the entire meta optimizer.
       - min_graph_nodes: The minimum number of nodes in a graph to optimizer.
@@ -448,6 +448,9 @@ def list_physical_devices(device_type=None):
   Args:
     device_type: (optional string) Only include devices matching this device
       type. For example "CPU" or "GPU".
+    Notes: 1. If provided with any numerical values or any string other than
+      supported device type such as 'CPU' it returns an empty list instead of
+      raising error. 2. For default value it returns all physical devices
 
   Returns:
     List of discovered `tf.config.PhysicalDevice` objects
@@ -484,6 +487,9 @@ def list_logical_devices(device_type=None):
   Args:
     device_type: (optional string) Only include devices matching this device
       type. For example "CPU" or "GPU".
+    Notes: 1. If provided with any numerical values or any string other than
+      supported device type such as 'CPU' it returns an empty list instead of
+      raising error. 2. For default value it returns all logical devices
 
   Returns:
     List of initialized `LogicalDevice`s

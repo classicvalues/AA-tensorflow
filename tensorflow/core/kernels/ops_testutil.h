@@ -181,7 +181,7 @@ class OpsTestBase : public ::testing::Test {
 
   mutex lock_for_refs_;  // Used as the Mutex for inputs added as refs
 
-  gtl::InlinedVector<TensorValue, 4> inputs_;
+  absl::InlinedVector<TensorValue, 4> inputs_;
   // Owns Tensors.
   std::vector<Tensor*> tensors_;
   // Copies of the outputs in unified memory (host and device accessible).
@@ -203,7 +203,8 @@ class OpsTestBase : public ::testing::Test {
   SessionMetadata session_metadata_;
 
  private:
-  TF_DISALLOW_COPY_AND_ASSIGN(OpsTestBase);
+  OpsTestBase(const OpsTestBase&) = delete;
+  void operator=(const OpsTestBase&) = delete;
 };
 
 }  // namespace tensorflow

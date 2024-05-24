@@ -28,6 +28,7 @@ limitations under the License.
 #include "absl/base/internal/endian.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "tensorflow/core/platform/file_system.h"
 #include "tensorflow/core/platform/macros.h"
@@ -36,13 +37,15 @@ limitations under the License.
 #include "tensorflow/core/profiler/convert/trace_viewer/trace_viewer_visibility.h"
 #include "tensorflow/core/profiler/protobuf/trace_events.pb.h"
 #include "tensorflow/core/profiler/protobuf/trace_events_raw.pb.h"
-#include "tensorflow/tsl/lib/io/table.h"
-#include "tensorflow/tsl/lib/io/table_builder.h"
-#include "tensorflow/tsl/lib/io/table_options.h"
-#include "tensorflow/tsl/platform/env.h"
-#include "tensorflow/tsl/platform/errors.h"
-#include "tensorflow/tsl/platform/status.h"
-#include "tensorflow/tsl/profiler/utils/timespan.h"
+#include "tsl/lib/io/iterator.h"
+#include "tsl/lib/io/table.h"
+#include "tsl/lib/io/table_builder.h"
+#include "tsl/lib/io/table_options.h"
+#include "tsl/platform/env.h"
+#include "tsl/platform/errors.h"
+#include "tsl/platform/file_system.h"
+#include "tsl/platform/status.h"
+#include "tsl/profiler/utils/timespan.h"
 
 namespace tensorflow {
 namespace profiler {
@@ -169,6 +172,36 @@ std::vector<std::vector<const TraceEvent*>> GetEventsByLevel(
   return events_by_level;
 }
 
+absl::Status ReadFileTraceMetadata(std::string& filepath, Trace* trace) {
+  // 1. Open the file.
+  uint64_t file_size;
+  TF_RETURN_IF_ERROR(tsl::Env::Default()->GetFileSize(filepath, &file_size));
+
+  tsl::FileSystem* file_system;
+  TF_RETURN_IF_ERROR(
+      tsl::Env::Default()->GetFileSystemForFile(filepath, &file_system));
+
+  std::unique_ptr<tsl::RandomAccessFile> file;
+  TF_RETURN_IF_ERROR(file_system->NewRandomAccessFile(filepath, &file));
+
+  tsl::table::Options options;
+  options.block_size = 20 * 1024 * 1024;
+  tsl::table::Table* table = nullptr;
+  TF_RETURN_IF_ERROR(
+      tsl::table::Table::Open(options, file.get(), file_size, &table));
+  std::unique_ptr<tsl::table::Table> table_deleter(table);
+
+  std::unique_ptr<tsl::table::Iterator> iterator(table->NewIterator());
+  if (iterator == nullptr) return absl::UnknownError("Could not open table");
+
+  // 2. Read the metadata.
+  iterator->SeekToFirst();
+  if (!ReadTraceMetadata(iterator.get(), kTraceMetadataKey, trace)) {
+    return absl::UnknownError("Could not parse Trace proto");
+  }
+  return absl::OkStatus();
+}
+
 // Store the contents of this container in an sstable file. The format is as
 // follows:
 //
@@ -182,14 +215,8 @@ std::vector<std::vector<const TraceEvent*>> GetEventsByLevel(
 // Note that each event only appears exactly once, at the first layer it's
 // eligible for.
 tsl::Status DoStoreAsLevelDbTable(
-    const std::string& filename, const Trace& trace,
+    std::unique_ptr<tsl::WritableFile>& file, const Trace& trace,
     const std::vector<std::vector<const TraceEvent*>>& events_by_level) {
-  std::unique_ptr<tensorflow::WritableFile> file;
-  tensorflow::FileSystem* file_system;
-  TF_RETURN_IF_ERROR(
-      tsl::Env::Default()->GetFileSystemForFile(filename, &file_system));
-  TF_RETURN_IF_ERROR(file_system->NewWritableFile(filename, &file));
-
   tsl::table::Options options;
   options.block_size = 20 * 1024 * 1024;
   options.compression = tsl::table::kSnappyCompression;
@@ -230,12 +257,14 @@ tsl::Status DoStoreAsLevelDbTable(
       mutable_event->set_timestamp_ps(timestamp);
     }
   }
+  absl::string_view filename;
+  TF_RETURN_IF_ERROR(file->Name(&filename));
   LOG(INFO) << "Storing " << trace.num_events() - num_of_events_dropped
             << " as LevelDb table fast file: " << filename << " with "
             << num_of_events_dropped << " events dropped.";
 
   TF_RETURN_IF_ERROR(builder.Finish());
-  return tsl::OkStatus();
+  return file->Close();
 }
 
 tsl::Status DoLoadFromLevelDbTable(
@@ -268,7 +297,8 @@ tsl::Status DoLoadFromLevelDbTable(
   // Read the metadata.
   iterator->SeekToFirst();
   if (!ReadTraceMetadata(iterator.get(), kTraceMetadataKey, &trace)) {
-    return tsl::errors::Unknown("Could not parse Trace proto");
+    return absl::UnknownError(
+        "Could not parse Trace proto to read trace metadata");
   }
 
   if (filter) filter->SetUp(trace);

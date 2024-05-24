@@ -27,10 +27,13 @@ from absl import logging
 
 from google.protobuf import text_format as _text_format
 from google.protobuf.message import DecodeError
+from tensorflow.compiler.mlir.quantization.stablehlo import quantization_config_pb2 as qc
+from tensorflow.compiler.mlir.quantization.tensorflow.python import representative_dataset as rd
 from tensorflow.core.framework import graph_pb2 as _graph_pb2
 from tensorflow.lite.experimental.microfrontend.python.ops import audio_microfrontend_op  # pylint: disable=unused-import
-from tensorflow.lite.python import conversion_metadata_schema_py_generated as conversion_metdata_fb
+from tensorflow.lite.python import conversion_metadata_schema_py_generated as conversion_metadata_fb
 from tensorflow.lite.python import lite_constants as constants
+from tensorflow.lite.python.convert import build_conversion_flags as _build_conversion_flags
 from tensorflow.lite.python.convert import convert_graphdef as _convert_graphdef
 from tensorflow.lite.python.convert import convert_graphdef_with_arrays as _convert_graphdef_with_arrays
 from tensorflow.lite.python.convert import convert_jax_hlo as _convert_jax_hlo
@@ -59,6 +62,8 @@ from tensorflow.lite.python.util import convert_debug_info_func as _convert_debu
 from tensorflow.lite.python.util import freeze_graph as _freeze_graph
 from tensorflow.lite.python.util import get_debug_info as _get_debug_info
 from tensorflow.lite.python.util import get_grappler_config as _get_grappler_config
+from tensorflow.lite.python.util import get_model_hash as _get_model_hash
+from tensorflow.lite.python.util import get_save_spec as _get_save_spec
 from tensorflow.lite.python.util import get_sparsity_modes as _get_sparsity_modes
 from tensorflow.lite.python.util import get_tensor_name as _get_tensor_name
 from tensorflow.lite.python.util import get_tensors_from_tensor_names as _get_tensors_from_tensor_names
@@ -73,7 +78,6 @@ from tensorflow.lite.python.util import trace_model_call as _trace_model_call
 from tensorflow.lite.tools import flatbuffer_utils
 from tensorflow.lite.tools.optimize.debugging.python.debugger import QuantizationDebugger  # pylint: disable=unused-import
 from tensorflow.lite.tools.optimize.debugging.python.debugger import QuantizationDebugOptions  # pylint: disable=unused-import
-from tensorflow.python import saved_model as _saved_model
 from tensorflow.python.client import session as _session
 from tensorflow.python.eager import context
 from tensorflow.python.eager import def_function as _def_function
@@ -82,11 +86,13 @@ from tensorflow.python.framework import byte_swap_tensor as bst
 from tensorflow.python.framework import convert_to_constants as _convert_to_constants
 from tensorflow.python.framework import dtypes as _dtypes
 from tensorflow.python.framework import ops as _ops
+from tensorflow.python.framework import tensor_spec
 from tensorflow.python.framework import versions
 from tensorflow.python.framework.errors_impl import NotFoundError as _NotFoundError
 from tensorflow.python.framework.importer import import_graph_def as _import_graph_def
 from tensorflow.python.platform import gfile
 from tensorflow.python.saved_model import loader_impl as _loader_impl
+from tensorflow.python.saved_model import save as _save
 from tensorflow.python.saved_model import save_options as _save_options
 from tensorflow.python.saved_model import signature_constants as _signature_constants
 from tensorflow.python.saved_model import tag_constants as _tag_constants
@@ -94,6 +100,7 @@ from tensorflow.python.saved_model.load import load as _load
 from tensorflow.python.saved_model.loader_impl import parse_saved_model_with_debug_info as _parse_saved_model_with_debug_info
 from tensorflow.python.util import deprecation as _deprecation
 from tensorflow.python.util import keras_deps
+from tensorflow.python.util import nest
 from tensorflow.python.util.tf_export import tf_export as _tf_export
 
 
@@ -149,7 +156,6 @@ class Optimize(enum.Enum):
   # The flag can be used alone to optimize float32 models with sparse weights.
   # It can also be used together with the DEFAULT optimization mode to optimize
   # quantized models with sparse weights.
-  # TODO(b/161560631): Add log message when this optimization is applied.
   EXPERIMENTAL_SPARSITY = "EXPERIMENTAL_SPARSITY"
 
   def __str__(self):
@@ -226,8 +232,6 @@ class TargetSpec:
     # Hint for the supported accumulation type used for inference. Typically
     # used for fp16 post-training quantization, where some models can use fp16
     # accumulators instead of the typical fp32 type.
-    # TODO(b/188185962): Provide full API and authoring support for
-    # reduced precision accumulation types.
     self._experimental_supported_accumulation_type = None
 
 
@@ -263,8 +267,14 @@ class QuantizationMode:
     self._target_spec = target_spec
     self._representative_dataset = representative_dataset
     self._graph_def = graph_def
+    if self._is_int8_target_required():
+      self._validate_int8_required()
 
-    self._validate_int8_required()
+    self.enable_mlir_variable_quantization = (
+        experimental_mlir_variable_quantization
+    )
+    if self._is_float16_target_required():
+      self._validate_float16_required()
     self._disable_per_channel = disable_per_channel
 
     self._enable_new_dynamic_range_quantizer = (
@@ -278,10 +288,6 @@ class QuantizationMode:
         full_integer_quantization_bias_type
     )
     self._validate_full_integer_quantization_bias_type()
-
-    self.enable_mlir_variable_quantization = (
-        experimental_mlir_variable_quantization
-    )
 
   def is_post_training_int8_only_quantization(self):
     return (
@@ -471,9 +477,6 @@ class QuantizationMode:
 
   def _validate_int8_required(self):
     """Int8 mode requires certain parameters to exist and be compatible."""
-    if not self._is_int8_target_required():
-      return
-
     # Validate target_spec attibute.
     if set(self._target_spec.supported_ops) == {
         OpsSet.TFLITE_BUILTINS_INT8
@@ -506,6 +509,14 @@ class QuantizationMode:
         self._representative_dataset = RepresentativeDataset(
             self._representative_dataset
         )
+
+  def _validate_float16_required(self):
+    """Float16 mode requires certain parameters to exist and be compatible."""
+    if self.enable_mlir_variable_quantization:
+      raise ValueError(
+          "`_experimental_variable_quantization` is only supported for full"
+          " integer quantization."
+      )
 
   def _validate_full_integer_quantization_bias_type(self):
     """Validates bias type for full interger quantization."""
@@ -551,6 +562,9 @@ class QuantizationMode:
         OpsSet.SELECT_TF_OPS in set(self._target_spec.supported_ops)
     )
 
+  def _is_float16_target_required(self):
+    return _dtypes.float16 in self._target_spec.supported_types
+
   def is_any_optimization_enabled(self):
     return bool(
         set(self._optimizations).intersection([
@@ -593,7 +607,7 @@ class TFLiteConverterBase:
 
   # Stores the original model type temporarily to transmit the information
   # from the factory class methods to TFLiteConverterBase init function.
-  _original_model_type = conversion_metdata_fb.ModelType.NONE
+  _original_model_type = conversion_metadata_fb.ModelType.NONE
 
   def __init__(self):
     self.optimizations = set()
@@ -622,20 +636,25 @@ class TFLiteConverterBase:
     self._experimental_tf_quantization_mode = None
     # If unset, bias:int32 is by default except 16x8 quant.
     # For 16x8 quant, bias:int64 is used to prevent any overflow by default.
+    # The accumulator type will be the same as bias type set by
+    # full_integer_quantization_bias_type.
     self._experimental_full_integer_quantization_bias_type = None
     # Provides specs for quantization, whether preset or custom.
-    self._experimental_quantization_options = None
+    self._experimental_quantization_options = None  # Deprecated
+    # Whether to use StableHLO Quantizer instead of TFLite Quantizer.
+    self.experimental_use_stablehlo_quantizer = False
+    # Quantization configuration to pass to StableHLO Quantizer.
+    self.experimental_stablehlo_quantizer_config = None
     # Initializes conversion metadata.
     self.exclude_conversion_metadata = False
-    self._metadata = conversion_metdata_fb.ConversionMetadataT()
-    self._metadata.environment = conversion_metdata_fb.EnvironmentT()
-    self._metadata.options = conversion_metdata_fb.ConversionOptionsT()
+    self._metadata = conversion_metadata_fb.ConversionMetadataT()
+    self._metadata.environment = conversion_metadata_fb.EnvironmentT()
+    self._metadata.options = conversion_metadata_fb.ConversionOptionsT()
     self._metadata.environment.tensorflowVersion = versions.__version__
     self._metadata.environment.modelType = self._get_original_model_type()
     self._experimental_enable_dynamic_update_slice = False
     self._experimental_preserve_assert_op = False
     self._experimental_guarantee_all_funcs_one_use = False
-    self._experimental_enable_hlo_to_tf_conversion = False
 
     # When the value is true, the MLIR quantantizer triggers dynamic range
     # quantization in MLIR instead of the old quantizer. Used only if
@@ -650,12 +669,20 @@ class TFLiteConverterBase:
     self._experimental_variable_quantization = False
     self._experimental_disable_fuse_mul_and_fc = False
     self._experimental_use_buffer_offset = False
+    self._experimental_reduce_type_precision = False
+    self._experimental_qdq_conversion_mode = None
+    self._experimental_disable_per_channel_quantization_for_dense_layers = False
+    self._experimental_enable_composite_direct_lowering = False
 
     # Debug parameters
-    self.mlir_dump_dir = None
-    self.mlir_dump_pass_regex = None
-    self.mlir_dump_func_regex = None
-    self.mlir_enable_timing = False
+    self.ir_dump_dir = None
+    self.ir_dump_pass_regex = None
+    self.ir_dump_func_regex = None
+    self.enable_timing = None
+    self.print_ir_before = None
+    self.print_ir_after = None
+    self.print_ir_module_scope = None
+    self.elide_elementsattrs_if_larger = None
 
   def _grappler_config(self, optimizers=None):
     """Creates a tf.compat.v1.ConfigProto for configuring Grappler.
@@ -691,6 +718,7 @@ class TFLiteConverterBase:
       bias_type,
       allow_float,
       enable_variable_quantization,
+      debug_options,
   ):
     """Quantize the model."""
     # pylint: disable=protected-access
@@ -725,14 +753,14 @@ class TFLiteConverterBase:
     elif self.experimental_new_quantizer and (
         activations_type != _dtypes.int16
     ):
-      # TODO(b/175659372): remove the activations_type restriction and enable
-      # it for all the activation types.
       return _mlir_quantize(
           calibrated,
           self._experimental_disable_per_channel,
           input_data_type=input_type,
           output_data_type=output_type,
           enable_variable_quantization=enable_variable_quantization,
+          disable_per_channel_for_dense_layers=self._experimental_disable_per_channel_quantization_for_dense_layers,
+          debug_options_str=debug_options.SerializeToString(),
       )
     else:
       return calibrate_quantize.calibrate_and_quantize(
@@ -786,14 +814,27 @@ class TFLiteConverterBase:
         "allow_all_select_tf_ops": self._experimental_allow_all_select_tf_ops,
         "disable_fuse_mul_and_fc": self._experimental_disable_fuse_mul_and_fc,
         "quantization_options": self._experimental_quantization_options,
-        "enable_hlo_to_tf_conversion": (
-            self._experimental_enable_hlo_to_tf_conversion
-        ),
-        "mlir_dump_dir": self.mlir_dump_dir,
-        "mlir_dump_pass_regex": self.mlir_dump_pass_regex,
-        "mlir_dump_func_regex": self.mlir_dump_func_regex,
-        "mlir_enable_timing": self.mlir_enable_timing,
+        "ir_dump_dir": self.ir_dump_dir,
+        "ir_dump_pass_regex": self.ir_dump_pass_regex,
+        "ir_dump_func_regex": self.ir_dump_func_regex,
+        "enable_timing": self.enable_timing,
+        "print_ir_before": self.print_ir_before,
+        "print_ir_after": self.print_ir_after,
+        "print_ir_module_scope": self.print_ir_module_scope,
+        "elide_elementsattrs_if_larger": self.elide_elementsattrs_if_larger,
         "use_buffer_offset": self._experimental_use_buffer_offset,
+        "reduce_type_precision": self._experimental_reduce_type_precision,
+        "use_stablehlo_quantizer": self.experimental_use_stablehlo_quantizer,
+        "stablehlo_quantizer_config": (
+            self.experimental_stablehlo_quantizer_config
+        ),
+        "qdq_conversion_mode": self._experimental_qdq_conversion_mode,
+        "disable_per_channel_quantization_for_dense_layers": (
+            self._experimental_disable_per_channel_quantization_for_dense_layers
+        ),
+        "enable_composite_direct_lowering": (
+            self._experimental_enable_composite_direct_lowering
+        ),
     }
 
     if self.saved_model_dir:
@@ -812,7 +853,68 @@ class TFLiteConverterBase:
           " path will be a no-op."
       )
 
+    if self.experimental_use_stablehlo_quantizer:
+      self._assign_stablehlo_quantization_config_or_populate_default(args)
+    elif self.experimental_stablehlo_quantizer_config is not None:
+      raise ValueError(
+          "QuantizationConfig should be provided only when"
+          " experimental_use_stablehlo_quantizer is set to true."
+      )
+
     return args
+
+  def _assign_stablehlo_quantization_config_or_populate_default(self, args):
+    """Assigns `QuantizationConfig` to `args` or populate default.
+
+    Args:
+      args: Dictionary of argument names and associated values.
+    """
+    if (
+        self.experimental_stablehlo_quantizer_config is not None
+        and Optimize.DEFAULT not in self.optimizations
+    ):
+      args["quantization_config"] = self.experimental_stablehlo_quantizer_config
+    elif Optimize.DEFAULT in self.optimizations and self.representative_dataset:
+      if len(self._saved_model_exported_names) != 1:
+        raise ValueError(
+            "StableHLO quantizer is only supported when converting from a"
+            " SavedModel with one signature key."
+        )
+
+      signature_key = self._saved_model_exported_names[0]
+
+      # Convert a programmatically provided representative dataset to a
+      # temporary TFRecord file to be used by the StableHLO quantizer.
+      tfrecord_file_path = tempfile.mkstemp(
+          suffix=".tfrecord", prefix=signature_key
+      )[1]
+      rd.TfRecordRepresentativeDatasetSaver(
+          {signature_key: tfrecord_file_path}
+      ).save({signature_key: self.representative_dataset()})
+
+      quantization_config = qc.QuantizationConfig(
+          static_range_ptq_preset=qc.StaticRangePtqPreset(
+              representative_datasets=[
+                  qc.RepresentativeDatasetConfig(
+                      tf_record=qc.TfRecordFile(path=tfrecord_file_path)
+                  )
+              ],
+              enable_per_channel_quantized_weight=True,
+              enable_full_int_quantization=True,
+          ),
+          # For ODML use cases, uniform quantized types should be left intact.
+          pipeline_config=qc.PipelineConfig(
+              unpack_quantized_types=False,
+          ),
+      )
+
+      args["quantization_config"] = quantization_config
+      # TODO: b/307626463 - Enable StableHLO quantizer DRQ when Optimize.DEFAULT
+      # is set without representative dataset.
+    else:
+      raise ValueError(
+          "StableHLO quantizer only supports static-range and weight-only PTQ."
+      )
 
   def _contains_function_with_implements_attr(self, saved_model_proto):
     meta_graph = saved_model_proto.meta_graphs[0]
@@ -878,7 +980,7 @@ class TFLiteConverterBase:
   @classmethod
   def _set_original_model_type(cls, model_type):
     """Stores the original model type."""
-    if model_type == conversion_metdata_fb.ModelType.NONE:
+    if model_type == conversion_metadata_fb.ModelType.NONE:
       raise ValueError("The original model type should be specified.")
     cls._original_model_type = model_type
 
@@ -886,7 +988,7 @@ class TFLiteConverterBase:
     """One-time getter to return original model type and set it to NONE."""
     model_type = TFLiteConverterBase._original_model_type
     TFLiteConverterBase._original_model_type = (
-        conversion_metdata_fb.ModelType.NONE
+        conversion_metadata_fb.ModelType.NONE
     )
     return model_type
 
@@ -936,13 +1038,11 @@ class TFLiteConverterBase:
 
     # pylint: disable=protected-access
     if self.target_spec._experimental_supported_accumulation_type:
-      converter_kwargs.update(
-          {
-              "accumulation_type": (
-                  self.target_spec._experimental_supported_accumulation_type
-              )
-          }
-      )
+      converter_kwargs.update({
+          "accumulation_type": (
+              self.target_spec._experimental_supported_accumulation_type
+          )
+      })
     # pylint: enable=protected-access
 
     def format_element(elem):
@@ -974,37 +1074,46 @@ class TFLiteConverterBase:
 
     if quant_mode.is_post_training_float16_quantization():
       self._metadata.options.modelOptimizationModes.append(
-          conversion_metdata_fb.ModelOptimizationMode.PTQ_FLOAT16
+          conversion_metadata_fb.ModelOptimizationMode.PTQ_FLOAT16
       )
 
     if quant_mode.is_post_training_dynamic_range_quantization():
       self._metadata.options.modelOptimizationModes.append(
-          conversion_metdata_fb.ModelOptimizationMode.PTQ_DYNAMIC_RANGE
+          conversion_metadata_fb.ModelOptimizationMode.PTQ_DYNAMIC_RANGE
       )
 
     if quant_mode.is_post_training_int8_quantization():
       self._metadata.options.modelOptimizationModes.append(
-          conversion_metdata_fb.ModelOptimizationMode.PTQ_FULL_INTEGER
+          conversion_metadata_fb.ModelOptimizationMode.PTQ_FULL_INTEGER
       )
 
     if quant_mode.is_post_training_int16x8_quantization():
       self._metadata.options.modelOptimizationModes.append(
-          conversion_metdata_fb.ModelOptimizationMode.PTQ_INT16
+          conversion_metadata_fb.ModelOptimizationMode.PTQ_INT16
       )
 
     if quant_mode.is_quantization_aware_training():
       self._metadata.options.modelOptimizationModes.append(
-          conversion_metdata_fb.ModelOptimizationMode.QUANTIZATION_AWARE_TRAINING
+          conversion_metadata_fb.ModelOptimizationMode.QUANTIZATION_AWARE_TRAINING
       )
 
   def _set_conversion_latency_metric(self, value):
     self._tflite_metrics.set_converter_latency(value)
 
   @convert_phase(Component.OPTIMIZE_TFLITE_MODEL)
-  def _optimize_tflite_model(self, model, quant_mode, quant_io=True):
+  def _optimize_tflite_model(
+      self, model, quant_mode, debug_options, quant_io=True
+  ):
     """Apply optimizations on a TFLite model."""
 
-    if quant_mode.is_integer_quantization():
+    # Disable TFLite quantization pass when
+    # `experimental_use_stablehlo_quantizer` is set to `True`. StableHLO
+    # Quantizer performs quantization during the conversion step, which happens
+    # before `_optimize_tflite_model`.
+    if (
+        quant_mode.is_integer_quantization()
+        and not self.experimental_use_stablehlo_quantizer
+    ):
       in_type, out_type = self.inference_input_type, self.inference_output_type
 
       if quant_mode.is_post_training_integer_quantization():
@@ -1022,6 +1131,7 @@ class TFLiteConverterBase:
             q_bias_type,
             q_allow_float,
             q_variable_quantization,
+            debug_options,
         )
 
       m_in_type = in_type if in_type else _dtypes.float32
@@ -1040,7 +1150,6 @@ class TFLiteConverterBase:
       model = _mlir_sparsify(model)
 
     if not self._experimental_use_buffer_offset:
-      # TODO(b/287476027): move this logic into c++
       try:
         model_object = flatbuffer_utils.convert_bytearray_to_object(model)
         if _check_model_use_buffer_offset(model_object):
@@ -1086,7 +1195,9 @@ class TFLiteConverterBase:
     # Populates the conversion metadata.
     # TODO(b/202090541): Collects sparsity block size information.
     sparsity_modes = _get_sparsity_modes(model_object)
+    model_hash = _get_model_hash(model_object)
     self._metadata.options.modelOptimizationModes.extend(sparsity_modes)
+    self._metadata.environment.modelHash = model_hash
     model_object = _populate_conversion_metadata(model_object, self._metadata)
     return flatbuffer_utils.convert_object_to_bytearray(model_object)
 
@@ -1140,7 +1251,7 @@ class TFLiteConverterBaseV2(TFLiteConverterBase):
       if quant_mode.is_post_training_int16x8_quantization():
         all_types = default_types + [_dtypes.int16]
       else:
-        all_types = default_types + [_dtypes.int8, _dtypes.uint8]
+        all_types = default_types + [_dtypes.int8, _dtypes.uint8, _dtypes.int16]
       if (
           self.inference_input_type not in all_types
           or self.inference_output_type not in all_types
@@ -1310,7 +1421,10 @@ class TFLiteConverterBaseV2(TFLiteConverterBase):
 
     result = _convert_saved_model(**converter_kwargs)
     return self._optimize_tflite_model(
-        result, quant_mode, quant_io=self.experimental_new_quantizer
+        result,
+        quant_mode,
+        _build_conversion_flags(**converter_kwargs).debug_options,
+        quant_io=self.experimental_new_quantizer,
     )
 
   def convert(self, graph_def, input_tensors, output_tensors):
@@ -1356,7 +1470,10 @@ class TFLiteConverterBaseV2(TFLiteConverterBase):
     )
 
     return self._optimize_tflite_model(
-        result, self._quant_mode, quant_io=self.experimental_new_quantizer
+        result,
+        self._quant_mode,
+        _build_conversion_flags(**converter_kwargs).debug_options,
+        quant_io=self.experimental_new_quantizer,
     )
 
 
@@ -1426,7 +1543,6 @@ class TFLiteSavedModelConverterV2(TFLiteConverterBaseV2):
       )
       # We make sure to clear the saved_model_dir as there is some
       # legacy code down in the caller that checks this.
-      # TODO(b/162537905): Clean these indirect dependencies.
       self.saved_model_dir = None
       return super(TFLiteSavedModelConverterV2, self).convert(
           graph_def, input_tensors, output_tensors
@@ -1479,11 +1595,57 @@ class TFLiteKerasModelConverterV2(TFLiteConverterBaseV2):
       output_tensors: List of output tensors.
     """
     try:
-      _saved_model.save(
-          self._keras_model,
-          output_dir,
-          options=_save_options.SaveOptions(save_debug_info=True),
-      )
+
+      def _is_keras_3():
+        """Returns true if _keras_model is a Keras 3+ model."""
+        try:
+          import keras  # pylint: disable=g-import-not-at-top
+
+          return keras.__version__.startswith("3") and isinstance(
+              self._keras_model, keras.layers.Layer
+          )
+        except ImportError:
+          return False
+
+      if _is_keras_3():
+        import keras  # pylint: disable=g-import-not-at-top
+
+        # Keras 3 model `export` by default saves model.__call__ with
+        # training=True. Need to export the model call with training=False for
+        # inference only and TFLite conversion.
+        export_archive = keras.export.ExportArchive()
+        export_archive.track(self._keras_model)
+        if isinstance(
+            self._keras_model,
+            (keras.src.models.Functional, keras.src.models.Sequential),
+        ):
+          input_signature = nest.map_structure(
+              lambda x: tensor_spec.TensorSpec(
+                  x.shape, dtype=x.dtype, name=x.name
+              ),
+              self._keras_model.inputs,
+          )
+          if isinstance(input_signature, list) and len(input_signature) > 1:
+            input_signature = [input_signature]
+        else:
+          save_spec = _get_save_spec(self._keras_model)
+          if not save_spec:
+            raise ValueError(
+                "The model provided has never been called. "
+                "It must be called at least once before export."
+            )
+          input_signature = [save_spec]
+        inference_fn = functools.partial(
+            self._keras_model.__call__, training=False
+        )
+        export_archive.add_endpoint("serve", inference_fn, input_signature)
+        export_archive.write_out(output_dir)
+      else:
+        _save.save(
+            self._keras_model,
+            output_dir,
+            options=_save_options.SaveOptions(save_debug_info=True),
+        )
     except Exception:  # pylint: disable=broad-except
       # When storing the given keras model to a saved model is failed, let's
       # use original keras model conversion pipeline.
@@ -1630,8 +1792,6 @@ class TFLiteFrozenGraphConverterV2(TFLiteConverterBaseV2):
     Raises:
       ValueError: none or multiple ConcreteFunctions provided.
     """
-    # TODO(b/130297984): Add support for converting multiple function.
-
     if len(self._funcs) == 0:  # pylint: disable=g-explicit-length-test
       raise ValueError("No ConcreteFunction is specified.")
 
@@ -1679,7 +1839,7 @@ class TFLiteFrozenGraphConverterV2(TFLiteConverterBaseV2):
 
     # Without the provided trackable obj, it is not able to serialize the given
     # concrete functions as a saved model format. Also when trackable obj is
-    # a function, use the original concrete function conversion pipline.
+    # a function, use the original concrete function conversion pipeline.
     if not self._trackable_obj or isinstance(
         self._trackable_obj,
         (_function.ConcreteFunction, _def_function.Function),
@@ -1701,7 +1861,7 @@ class TFLiteFrozenGraphConverterV2(TFLiteConverterBaseV2):
           signatures[func.graph.name] = func
           signature_keys.append(func.graph.name)
 
-      _saved_model.save(
+      _save.save(
           self._trackable_obj,
           output_dir,
           signatures=signatures,
@@ -1888,7 +2048,10 @@ class TFLiteJaxConverterV2(TFLiteConverterBaseV2):
     result = _convert_jax_hlo(**converter_kwargs)
 
     return self._optimize_tflite_model(
-        result, quant_mode, quant_io=self.experimental_new_quantizer
+        result,
+        quant_mode,
+        _build_conversion_flags(**converter_kwargs).debug_options,
+        quant_io=self.experimental_new_quantizer,
     )
 
 
@@ -1995,7 +2158,7 @@ class TFLiteConverterV2(TFLiteFrozenGraphConverterV2):
     """
     # pylint: disable=protected-access
     TFLiteConverterBase._set_original_model_type(
-        conversion_metdata_fb.ModelType.TF_CONCRETE_FUNCTIONS
+        conversion_metadata_fb.ModelType.TF_CONCRETE_FUNCTIONS
     )
     # pylint: enable=protected-access
     if trackable_obj is None:
@@ -2038,7 +2201,7 @@ class TFLiteConverterV2(TFLiteFrozenGraphConverterV2):
     """
     # pylint: disable=protected-access
     TFLiteConverterBase._set_original_model_type(
-        conversion_metdata_fb.ModelType.TF_SAVED_MODEL
+        conversion_metadata_fb.ModelType.TF_SAVED_MODEL
     )
     # pylint: enable=protected-access
     # When run without eager enabled, this will return the legacy
@@ -2058,15 +2221,13 @@ class TFLiteConverterV2(TFLiteFrozenGraphConverterV2):
           saved_model_dir, signature_key=signature_key, tag_set=tags
       )
 
-    # Ensures any graphs created in Eager mode are able to run. This is required
-    # in order to create a tf.estimator.Exporter that exports a TFLite model.
     if tags is None:
       tags = set([_tag_constants.SERVING])
 
     with context.eager_mode():
       saved_model = _load(saved_model_dir, tags)
     if not signature_keys:
-      signature_keys = saved_model.signatures
+      signature_keys = list(saved_model.signatures.keys())
 
     if not signature_keys:
       raise ValueError("Only support at least one signature key.")
@@ -2115,12 +2276,17 @@ class TFLiteConverterV2(TFLiteFrozenGraphConverterV2):
     """
     # pylint: disable=protected-access
     TFLiteConverterBase._set_original_model_type(
-        conversion_metdata_fb.ModelType.KERAS_MODEL
+        conversion_metadata_fb.ModelType.KERAS_MODEL
     )
     # pylint: enable=protected-access
     return TFLiteKerasModelConverterV2(model)
 
   @classmethod
+  @_deprecation.deprecated(
+      None,
+      "Use `jax2tf.convert` and (`lite.TFLiteConverter.from_saved_model`"
+      " or `lite.TFLiteConverter.from_concrete_functions`) instead.",
+  )
   def experimental_from_jax(cls, serving_funcs, inputs):
     # Experimental API, subject to changes.
     # TODO(b/197690428): Currently only support single function.
@@ -2138,7 +2304,7 @@ class TFLiteConverterV2(TFLiteFrozenGraphConverterV2):
     """
     # pylint: disable=protected-access
     TFLiteConverterBase._set_original_model_type(
-        conversion_metdata_fb.ModelType.JAX
+        conversion_metadata_fb.ModelType.JAX
     )
     # pylint: enable=protected-access
     return TFLiteJaxConverterV2(serving_funcs, inputs)
@@ -2421,7 +2587,10 @@ class TFLiteConverterBaseV1(TFLiteConverterBase):
       )
 
     return self._optimize_tflite_model(
-        result, quant_mode, quant_io=self.experimental_new_quantizer
+        result,
+        quant_mode,
+        _build_conversion_flags(**converter_kwargs).debug_options,
+        quant_io=self.experimental_new_quantizer,
     )
 
   def get_input_arrays(self):
@@ -2535,8 +2704,6 @@ class TFLiteSavedModelConverter(TFLiteConverterBaseV1):
     self.saved_model_dir = saved_model_dir
     self._saved_model_tags = saved_model_tags
     self._saved_model_exported_names = saved_model_exported_names
-
-    signature_key = _signature_constants.DEFAULT_SERVING_SIGNATURE_DEF_KEY
 
     if len(self._saved_model_exported_names) != 1:
       raise ValueError("Only support a single signature key.")
@@ -2955,7 +3122,7 @@ class TFLiteConverter(TFLiteFrozenGraphConverter):
     """
     # pylint: disable=protected-access
     TFLiteConverterBase._set_original_model_type(
-        conversion_metdata_fb.ModelType.TF_SESSION
+        conversion_metadata_fb.ModelType.TF_SESSION
     )
     # pylint: enable=protected-access
     graph_def = _freeze_graph(sess, input_tensors, output_tensors)
@@ -2995,7 +3162,7 @@ class TFLiteConverter(TFLiteFrozenGraphConverter):
     """
     # pylint: disable=protected-access
     TFLiteConverterBase._set_original_model_type(
-        conversion_metdata_fb.ModelType.TF_GRAPH_DEF
+        conversion_metadata_fb.ModelType.TF_GRAPH_DEF
     )
     # pylint: enable=protected-access
     with _ops.Graph().as_default():
@@ -3101,7 +3268,7 @@ class TFLiteConverter(TFLiteFrozenGraphConverter):
     """
     # pylint: disable=protected-access
     TFLiteConverterBase._set_original_model_type(
-        conversion_metdata_fb.ModelType.TF_SAVED_MODEL
+        conversion_metadata_fb.ModelType.TF_SAVED_MODEL
     )
     # pylint: enable=protected-access
     if tag_set is None:
@@ -3160,7 +3327,7 @@ class TFLiteConverter(TFLiteFrozenGraphConverter):
     """
     # pylint: disable=protected-access
     TFLiteConverterBase._set_original_model_type(
-        conversion_metdata_fb.ModelType.KERAS_MODEL
+        conversion_metadata_fb.ModelType.KERAS_MODEL
     )
     # pylint: enable=protected-access
     return TFLiteKerasModelConverter(

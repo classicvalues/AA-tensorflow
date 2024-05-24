@@ -19,8 +19,10 @@ import contextlib
 import functools
 import weakref
 
+from absl import logging
 import numpy as np
 
+from tensorflow.compiler.tf2xla.ops import gen_xla_ops
 from tensorflow.core.framework import attr_value_pb2
 from tensorflow.core.framework import variable_pb2
 from tensorflow.core.function import trace_type
@@ -36,6 +38,7 @@ from tensorflow.python.framework import composite_tensor
 from tensorflow.python.framework import composite_tensor_gradient
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import cpp_shape_inference_pb2
+from tensorflow.python.framework import device as pydev
 from tensorflow.python.framework import dtypes
 from tensorflow.python.framework import errors
 from tensorflow.python.framework import indexed_slices
@@ -43,13 +46,11 @@ from tensorflow.python.framework import ops
 from tensorflow.python.framework import tensor as tensor_module
 from tensorflow.python.framework import tensor_conversion_registry
 from tensorflow.python.framework import tensor_shape
-from tensorflow.python.framework import tensor_spec
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gen_array_ops
 from tensorflow.python.ops import gen_resource_variable_ops
 from tensorflow.python.ops import gen_state_ops
 from tensorflow.python.ops import handle_data_util
-from tensorflow.python.ops import math_ops
 from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import variables
 # go/tf-wildcard-import
@@ -59,7 +60,6 @@ from tensorflow.python.ops.gen_resource_variable_ops import *
 from tensorflow.python.saved_model import nested_structure_coder
 from tensorflow.python.trackable import base as trackable
 from tensorflow.python.types import core
-from tensorflow.python.util import _pywrap_utils
 from tensorflow.python.util import compat
 from tensorflow.python.util.deprecation import deprecated
 from tensorflow.python.util.tf_export import tf_export
@@ -76,7 +76,7 @@ get_resource_handle_data = handle_data_util.get_resource_handle_data
 
 def get_eager_safe_handle_data(handle):
   """Get the data handle from the Tensor `handle`."""
-  assert isinstance(handle, ops.Tensor)
+  assert isinstance(handle, tensor_module.Tensor)
 
   if isinstance(handle, ops.EagerTensor):
     return handle._handle_data  # pylint: disable=protected-access
@@ -172,6 +172,7 @@ def _variable_handle_from_shape_and_dtype(shape,
       shape=shape,
       dtype=dtype,
       shared_name=shared_name,
+      debug_name=name,
       name=name,
       container=container)
   if initial_value is None:
@@ -268,7 +269,7 @@ class EagerResourceDeleter:
   __slots__ = ["_handle", "_handle_device", "_context"]
 
   def __init__(self, handle, handle_device):
-    if not isinstance(handle, ops.Tensor):
+    if not isinstance(handle, tensor_module.Tensor):
       raise ValueError(
           (f"Passed handle={handle} to EagerResourceDeleter. Was expecting "
            f"the handle to be a `tf.Tensor`."))
@@ -369,9 +370,6 @@ def default_variable_creator_v2(next_creator=None, **kwargs):
       shape=shape,
       experimental_enable_variable_lifting=experimental_enable_variable_lifting,
       )
-
-
-variables.default_variable_creator_v2 = default_variable_creator_v2
 
 
 class BaseResourceVariable(variables.Variable, core.Tensor):
@@ -486,6 +484,31 @@ class BaseResourceVariable(variables.Variable, core.Tensor):
     self._constraint = constraint
     self._cached_shape_as_list = None
     self._validate_shape = validate_shape
+    self._xla_sharding = None
+    self._variable_read = False
+
+  def _get_xla_sharding(self):
+    return self._xla_sharding
+
+  def _set_xla_sharding(self, xla_sharding):
+    """Annotates this `ResourceVariable` with `xla_sharding`.
+
+    `xla_sharding` will be used to create an `XlaShardingOp` whenever a
+    `ReadVariableOp` is created.
+
+    Args:
+      xla_sharding: The xla.OpSharding proto to annotate this ResourceVariable
+        with.
+    """
+    if self._variable_read and not context.executing_eagerly():
+      logging.warning(
+          "This variable (%s) has already been read (ie. a ReadVariableOp has"
+          " already been generated) and a new XlaShardingOp using this sharding"
+          " will not be created unless it is read again. If that's not possible"
+          ", please set the XLA sharding before reading the variable.",
+          self.name,
+      )
+    self._xla_sharding = xla_sharding
 
   def __repr__(self):
     if context.executing_eagerly() and not self._in_graph_mode:
@@ -660,7 +683,7 @@ class BaseResourceVariable(variables.Variable, core.Tensor):
     return self._constraint
 
   @property
-  def op(self):
+  def op(self) -> ops.Operation:
     """The op for this variable."""
     return self.handle.op
 
@@ -712,6 +735,29 @@ class BaseResourceVariable(variables.Variable, core.Tensor):
     """
     return gen_state_ops.resource_count_up_to(
         self.handle, limit=limit, T=self.dtype)
+
+  def _copy_trackable_to_cpu(self, object_map):
+    """For implementing `Trackable`."""
+    if self not in object_map:
+      # If not populated, initialize the cpu copy first.
+      op_device = pydev.DeviceSpec.from_string(self.device).replace(
+          device_type="CPU", device_index=0).to_string()
+      with ops.device(op_device):
+        # Use `op_device` to prevent cross-device communication for variables
+        # like `ShardedVariable`
+        new_var = UninitializedVariable(
+            trainable=self.trainable,
+            shape=self.shape,
+            dtype=self.dtype,
+            name=self._shared_name)  # pylint: disable=protected-access
+      object_map[self] = new_var
+
+    # Then copy value of self to the copy.
+    destination_var = object_map[self]
+    with ops.device(destination_var.device):
+      # Use `op_device` to prevent cross-device communication for variables
+      # like `ShardedVariable`
+      destination_var.assign(self.read_value())
 
   def _export_to_saved_model_graph(self, object_map=None, tensor_map=None,
                                    options=None, **kwargs):
@@ -777,6 +823,7 @@ class BaseResourceVariable(variables.Variable, core.Tensor):
       The value of the variable.
     """
     variable_accessed(self)
+    self._variable_read = True
 
     def read_and_set_handle(no_copy):
       if no_copy and forward_compat.forward_compatible(2022, 5, 3):
@@ -800,6 +847,22 @@ class BaseResourceVariable(variables.Variable, core.Tensor):
           "ReadVariableOp", [result], [self.handle],
           backward_function=lambda x: [x],
           forward_function=lambda x: [x])
+
+    # Create an XlaShardingOp if this ResourceVariable is annotated with an XLA
+    # sharding i.e. the _xla_sharding field is set. Please see the design at
+    # http://shortn/_RGoruJpzrv for more details.
+    if (
+        context.xla_sharding_for_resource_variables_enabled()
+        and not context.executing_eagerly()
+        and self._xla_sharding is not None
+    ):
+      sharding_string = self._xla_sharding.SerializeToString()
+      result = gen_xla_ops.xla_sharding(result, sharding=sharding_string)
+      # pylint: disable=protected-access
+      result.op._set_attr(
+          "_XlaSharding",
+          attr_value_pb2.AttrValue(s=sharding_string),
+      )
     return result
 
   def read_value(self):
@@ -1933,7 +1996,7 @@ class ResourceVariable(BaseResourceVariable, composite_tensor.CompositeTensor):
                        "`variable_def`. You provided neither.")
     init_from_fn = callable(initial_value)
 
-    if isinstance(initial_value, ops.Tensor) and hasattr(
+    if isinstance(initial_value, tensor_module.Tensor) and hasattr(
         initial_value, "graph") and initial_value.graph.building_function:
       raise ValueError(f"Argument `initial_value` ({initial_value}) could not "
                        "be lifted out of a `tf.function`. "
@@ -2305,11 +2368,7 @@ class UninitializedVariable(BaseResourceVariable):
         trainable=trainable,
         synchronization=synchronization,
         aggregation=aggregation,
-        in_graph_mode=self._in_graph_mode)
-
-
-_pywrap_utils.RegisterType("ResourceVariable", ResourceVariable)
-math_ops._resource_variable_type = ResourceVariable  # pylint: disable=protected-access
+        in_graph_mode=self._in_graph_mode, **unused_kwargs)
 
 
 def _dense_var_to_tensor(var, dtype=None, name=None, as_ref=False):
@@ -2449,7 +2508,7 @@ class _UnreadVariable(BaseResourceVariable):
       return super(_UnreadVariable, self).scatter_nd_min(indices, updates, name)
 
   @property
-  def op(self):
+  def op(self) -> ops.Operation:
     """The op for this variable."""
     return self._parent_op
 
@@ -2540,7 +2599,7 @@ class PList(StructurePattern):
     return isinstance(other, PList) and self.components == other.components
 
 
-class VariableSpec(tensor_spec.DenseSpec):
+class VariableSpec(tensor_module.DenseSpec):
   """Describes a tf.Variable.
 
   A `VariableSpec` provides metadata describing the `tf.Variable` objects
@@ -2626,7 +2685,8 @@ class VariableSpec(tensor_spec.DenseSpec):
       raise ValueError(f"Components of a ResourceVariable must only contain "
                        f"its resource handle, got f{components} instead.")
     handle = components[0]
-    if not isinstance(handle, ops.Tensor) or handle.dtype != dtypes.resource:
+    if not isinstance(
+        handle, tensor_module.Tensor) or handle.dtype != dtypes.resource:
       raise ValueError(f"The handle of a ResourceVariable must be a resource "
                        f"tensor, got {handle} instead.")
     return ResourceVariable(trainable=self.trainable,
@@ -2637,7 +2697,7 @@ class VariableSpec(tensor_spec.DenseSpec):
   @property
   def _component_specs(self):
     return [
-        tensor_spec.TensorSpec(
+        tensor_module.TensorSpec(
             [],
             dtypes.DType(
                 dtypes.resource._type_enum,  # pylint: disable=protected-access
@@ -2696,7 +2756,7 @@ class VariableSpec(tensor_spec.DenseSpec):
       # exists in the PlaceholderContext
       variable = placeholder_context.get_placeholder(self.alias_id)
     else:
-      spec = tensor_spec.TensorSpec([], dtypes.resource)
+      spec = tensor_module.TensorSpec([], dtypes.resource)
       spec_context = trace_type.InternalPlaceholderContext(
           context_graph.outer_graph)
       spec_context.update_naming_scope(name)
@@ -2714,12 +2774,12 @@ class VariableSpec(tensor_spec.DenseSpec):
         attr_value_pb2.AttrValue(s=compat.as_bytes(name)))
     return variable
 
-  def _to_tensors(self, value):
+  def to_tensors(self, value):
     assert isinstance(value, BaseResourceVariable)
     variable_accessed(value)
     return [value.handle]
 
-  def _cast(self, value, _):
+  def cast(self, value, _):
     assert isinstance(value, BaseResourceVariable)
     return value
 
@@ -2745,9 +2805,6 @@ nested_structure_coder.register_codec(
         VariableSpec, struct_pb2.TypeSpecProto.VARIABLE_SPEC
     )
 )
-
-
-_pywrap_utils.RegisterType("VariableSpec", VariableSpec)
 
 
 def write_object_proto_for_resource_variable(resource_variable,

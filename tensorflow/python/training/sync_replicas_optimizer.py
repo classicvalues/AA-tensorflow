@@ -17,6 +17,7 @@
 from tensorflow.python.distribute import distribute_lib
 from tensorflow.python.framework import indexed_slices
 from tensorflow.python.framework import ops
+from tensorflow.python.framework import tensor
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import data_flow_ops
@@ -130,13 +131,6 @@ class SyncReplicasOptimizer(optimizer.Optimizer):
       hooks=[sync_replicas_hook]) as mon_sess:
     while not mon_sess.should_stop():
       mon_sess.run(training_op)
-  ```
-
-  To use SyncReplicasOptimizer with an `Estimator`, you need to send
-  sync_replicas_hook while calling the fit.
-  ```python
-  my_estimator = DNNClassifier(..., optimizer=opt)
-  my_estimator.fit(..., hooks=[sync_replicas_hook])
   ```
   """
 
@@ -277,7 +271,7 @@ class SyncReplicasOptimizer(optimizer.Optimizer):
           if grad is None:
             aggregated_grad.append(None)  # pass-through.
             continue
-          elif isinstance(grad, ops.Tensor):
+          elif isinstance(grad, tensor.Tensor):
             grad_accum = data_flow_ops.ConditionalAccumulator(
                 grad.dtype,
                 shape=var.get_shape(),

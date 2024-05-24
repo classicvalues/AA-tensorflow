@@ -32,7 +32,7 @@ limitations under the License.
 #include "tensorflow/core/platform/env.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/path.h"
-#include "tensorflow/tsl/lib/io/buffered_file.h"
+#include "tsl/lib/io/buffered_file.h"
 
 using llvm::raw_ostream;
 
@@ -114,7 +114,7 @@ struct WritableFileRawStream : public llvm::raw_ostream {
   std::unique_ptr<WritableFile> file;
 };
 
-struct CrashReproducerStream : public mlir::PassManager::ReproducerStream {
+struct CrashReproducerStream : public mlir::ReproducerStream {
   CrashReproducerStream(llvm::StringRef name,
                         std::unique_ptr<llvm::raw_ostream> file)
       : name(name), ostream(std::move(file)) {}
@@ -128,8 +128,7 @@ struct CrashReproducerStream : public mlir::PassManager::ReproducerStream {
 };
 
 // MLIR crash reproducer which reports failures to the crash analysis system.
-struct CrashAnalysisCrashReproducerStream
-    : public mlir::PassManager::ReproducerStream {
+struct CrashAnalysisCrashReproducerStream : public mlir::ReproducerStream {
  public:
   CrashAnalysisCrashReproducerStream()
       : internal_str(""), string_stream(internal_str) {}
@@ -218,10 +217,10 @@ std::string DumpMlirOpToFile(llvm::StringRef name, mlir::Operation* op,
   Status result = CreateFileForDumping(name, &os, &filepath, dirname);
   if (!result.ok()) return std::string(result.message());
 
+  LOG(INFO) << "Dumping MLIR operation '" << op->getName().getStringRef().str()
+            << "' to '" << filepath << "'";
   if (pass_manager) PrintPassPipeline(*pass_manager, op, *os);
   op->print(*os, mlir::OpPrintingFlags().useLocalScope());
-  LOG(INFO) << "Dumped MLIR operation '" << op->getName().getStringRef().str()
-            << "' to '" << filepath << "'";
   return filepath;
 }
 
@@ -304,9 +303,8 @@ void SetCrashReproducer(mlir::PassManager& pm, llvm::StringRef dir_path) {
     }
   }
 
-  mlir::PassManager::ReproducerStreamFactory factory =
-      [path](std::string& error)
-      -> std::unique_ptr<mlir::PassManager::ReproducerStream> {
+  mlir::ReproducerStreamFactory factory =
+      [path](std::string& error) -> std::unique_ptr<mlir::ReproducerStream> {
     if (path == kCrashReproducerStdErr)
       return std::make_unique<CrashReproducerStream>(
           "(stderr)", std::make_unique<LogInfoRawStream>());

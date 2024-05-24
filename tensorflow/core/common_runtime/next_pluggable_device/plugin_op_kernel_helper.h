@@ -20,13 +20,13 @@ limitations under the License.
 #include "tensorflow/c/tf_status_helper.h"
 #include "tensorflow/core/common_runtime/next_pluggable_device/c_plugin_op_kernel.h"
 #include "tensorflow/core/common_runtime/next_pluggable_device/direct_plugin_op_kernel.h"
-#include "tensorflow/core/common_runtime/next_pluggable_device/next_pluggable_device_c_api_flag.h"
+#include "tensorflow/core/common_runtime/next_pluggable_device/flags.h"
 #include "tensorflow/core/common_runtime/next_pluggable_device/plugin_op_kernel.h"
 
 namespace tensorflow {
 
 inline PluginOpKernelConstruction* CreatePluginOpKernelConstruction(void* ctx) {
-  if (!npd::kTfNextPluggableDeviceUseCApi) {
+  if (!absl::GetFlag(FLAGS_next_pluggable_device_use_c_api)) {
     return new DirectPluginOpKernelConstruction(ctx);
   } else {
     return new CPluginOpKernelConstruction(ctx);
@@ -39,7 +39,7 @@ inline void DeletePluginOpKernelConstruction(
 }
 
 inline PluginOpKernelContext* CreatePluginOpKernelContext(void* ctx) {
-  if (!npd::kTfNextPluggableDeviceUseCApi) {
+  if (!absl::GetFlag(FLAGS_next_pluggable_device_use_c_api)) {
     return new DirectPluginOpKernelContext(ctx);
   } else {
     return new CPluginOpKernelContext(ctx);
@@ -52,7 +52,7 @@ inline void DeletePluginOpKernelContext(PluginOpKernelContext* wrapper) {
 
 #define PLUGIN_OP_REQUIRES_OK(CTX, ...)          \
   do {                                           \
-    ::tensorflow::Status _s(__VA_ARGS__);        \
+    absl::Status _s(__VA_ARGS__);                \
     if (!TF_PREDICT_TRUE(_s.ok())) {             \
       (CTX)->CtxFailure(__FILE__, __LINE__, _s); \
       return;                                    \
